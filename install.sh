@@ -80,6 +80,18 @@ do_verify() {
   exit "$status"
 }
 
+uninstall_skill() {
+  latest_skill_bak="$(ls -1d "$skill_backup_dir"/delegator-activate.* 2>/dev/null | sort | tail -1 || true)"
+  if [ -d "$skill_dest" ]; then
+    rm -rf "$skill_dest"
+    echo "removed $skill_dest"
+  fi
+  if [ -n "$latest_skill_bak" ]; then
+    mv "$latest_skill_bak" "$skill_dest"
+    echo "restored $skill_dest <- $(basename "$latest_skill_bak")"
+  fi
+}
+
 do_uninstall() {
   for name in "${defs[@]}"; do
     base="$name.md"
@@ -97,15 +109,7 @@ do_uninstall() {
       echo "restored $target <- $(basename "$latest_bak")"
     fi
   done
-  latest_skill_bak="$(ls -1d "$skill_backup_dir"/delegator-activate.* 2>/dev/null | sort | tail -1 || true)"
-  if [ -d "$skill_dest" ]; then
-    rm -rf "$skill_dest"
-    echo "removed $skill_dest"
-  fi
-  if [ -n "$latest_skill_bak" ]; then
-    mv "$latest_skill_bak" "$skill_dest"
-    echo "restored $skill_dest <- $(basename "$latest_skill_bak")"
-  fi
+  uninstall_skill
   echo "uninstall done"
 }
 
@@ -117,8 +121,17 @@ case "${1:-}" in
   # are lead-owned and must never be copied over as a side effect of unrelated
   # work (confirmed live: a plain `./install.sh` re-sync once clobbered
   # in-flight edits to both files because the default action always re-copies
-  # every def alongside the skill).
-  --skill-only) install_skill ;;
+  # every def alongside the skill). `--skill-only --uninstall` exercises the
+  # skill's own remove/restore-from-backup path the same way, still without
+  # ever touching agents/*.md -- lets the full skill lifecycle (install /
+  # reinstall-with-diff / uninstall / restore) be proven in isolation.
+  --skill-only)
+    case "${2:-}" in
+      --uninstall) uninstall_skill; echo "skill uninstall done" ;;
+      "") install_skill ;;
+      *) echo "usage: $0 --skill-only [--uninstall]" >&2; exit 2 ;;
+    esac
+    ;;
   "") do_install ;;
-  *) echo "usage: $0 [--verify|--uninstall|--skill-only]" >&2; exit 2 ;;
+  *) echo "usage: $0 [--verify|--uninstall|--skill-only [--uninstall]]" >&2; exit 2 ;;
 esac
