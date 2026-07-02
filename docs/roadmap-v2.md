@@ -2,6 +2,8 @@
 
 Synthesized from 18 surviving proposals (adversarially scored) against the proven 2.1.198 physics. Near-duplicates merged; provenance noted per item. Governing rule everywhere: replace model discipline with harness mechanism, and probe before trusting any payload shape.
 
+> **External-review deltas (GPT review, 2026-07-02 — merged where they survive scrutiny):** (1) the router's `{skill,args,why,confidence}` grows only VERIFIABLE contract fields — `tier: direct|orchestrated`, `forbidden_actions`, `verification` (the full "execution contract" was rejected: un-derivable fields become router policy hallucination); (2) BMAD adapter example shipped at `docs/adapters/bmad.md`; (3) verifier duty added to the orchestrator charter (cold unnamed verifier after substantive mutations — never self-certify); (4) install.sh hardening (version stamp, post-install verify, uninstall) folds into L4 packaging; (5) its "named→named works" claim is STALE — the P-I same-day API rejection stands, design stays on the blocked side; its rest-with-ping description is also wrong (the child's SendMessage wakes the parent directly — no main relay).
+
 ---
 
 ## 1. TOP-3 — "the operator probably did not think of this"
