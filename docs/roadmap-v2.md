@@ -85,6 +85,11 @@ Synthesized from 18 surviving proposals (adversarially scored) against the prove
 - **Why now:** Second cost lever after X1 — deletes the whole layer testbed data says adds no correctness on bounded tasks — but needs the router live and a probe pair first.
 - **First step:** Add the tier field + rails, then run T3 (census-class, expect ≈ solo $0.40 and no named orchestrator) plus negative T3b (shallow-phrased gated task must bounce its gate to the delegator).
 
+### L4b. Runner → Python, jq-free hooks path *(external suggestion — PULLED INTO v1.0.0 by operator order: macOS is a real deployment target; stock macOS lacks jq, flock(1) and GNU timeout)*
+- **What:** port the graded suite runner to a single `run_all.py` (JSON assertions belong in Python, not bash+grep hybrids) and give `hooks/ledger.sh` a jq-free fallback (macOS ships python3 but not jq — the shell hot-path stays shell for latency; only the JSON munging moves).
+- **Why later, not now:** the bash runner was live-proving the v1.0.0 suite when this landed — don't churn a green harness mid-release for language aesthetics.
+- **First step:** `run_all.py` with the same assertion set, then delete the bash version once outputs match run-for-run.
+
 ### L4. Plugin packaging + /delegator-adopt
 - **What:** Phase A — `/delegator-adopt` scaffolds `.delegator/`, the CLAUDE.md router line, and a `router-map.json` harvested from ALL skill sources (plugin cache + user + workspace, regen-on-change, schema-validated by a real script); Phase B — package agents+hooks+skills+evals as a marketplace plugin with a one-day cutover (no dual defs, `--plugin-dir` dev loop, native `claude plugin eval` as the physics gate).
 - **Why now:** Distribution and multi-machine consistency only matter after N1/X2 produce the hooks and evals worth bundling.

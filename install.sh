@@ -53,7 +53,10 @@ do_uninstall() {
   for name in "${defs[@]}"; do
     base="$name.md"
     target="$dest/$base"
-    latest_bak="$(ls -1v "$dest/$base.bak."* 2>/dev/null | tail -1 || true)"
+    # plain lexical sort (portable: no GNU ls -v) -- safe because .bak.<epoch>
+    # suffixes are fixed-width (10-digit seconds until year 2286), so lexical
+    # order == numeric order == chronological order.
+    latest_bak="$(ls -1 "$dest/$base.bak."* 2>/dev/null | sort | tail -1 || true)"
     if [ -f "$target" ]; then
       rm -f "$target"
       echo "removed $target"

@@ -3,17 +3,17 @@
     "PostToolUse": [
       {
         "matcher": "Agent|SendMessage",
-        "hooks": [{"type": "command", "command": "__DELEGATOR_REPO__/hooks/ledger.sh"}]
+        "hooks": [{"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/ledger.py"}]
       }
     ],
     "SubagentStart": [
-      {"hooks": [{"type": "command", "command": "__DELEGATOR_REPO__/hooks/ledger.sh"}]}
+      {"hooks": [{"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/ledger.py"}]}
     ],
     "SubagentStop": [
-      {"hooks": [{"type": "command", "command": "__DELEGATOR_REPO__/hooks/ledger.sh"}]}
+      {"hooks": [{"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/ledger.py"}]}
     ],
     "TeammateIdle": [
-      {"hooks": [{"type": "command", "command": "__DELEGATOR_REPO__/hooks/ledger.sh"}]}
+      {"hooks": [{"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/ledger.py"}]}
     ]
   }
 }

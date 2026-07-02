@@ -8,6 +8,18 @@ observed to be silently skipped in at least one configuration, so both paths bel
 load the hooks at the **user** level (`~/.claude/settings.json`) or via `--settings`
 — never assume a project-level `.claude/settings.json` alone is enough.
 
+**Portability: stdlib-only Python, no shell dependencies.** `ledger.py` and
+`watchdog.py` import only `datetime`/`fcntl`/`json`/`os`/`sys`/`time` — no `jq`, no
+`flock(1)`, no GNU coreutils, no third-party packages. This is deliberate: the
+operator deploys on macOS, where stock has none of `jq`/`flock(1)`/GNU `timeout`.
+`fcntl` (used for the lock) is POSIX and ships in stock Python 3 on both macOS and
+Linux — those are the two supported platforms. **The original `ledger.sh` +
+`fold-registry.py` + `watchdog.sh` shell/jq versions have been removed** — the
+Python files are a straight behavioral port (same fields, same 400-char truncation,
+same ~5MB rotation, same anomaly types and output format), not a rewrite; see each
+file's module docstring for the one deliberate fix made while porting (a lost-update
+race in the registry fold, closed by moving the read inside the lock).
+
 ## What this proves (probe-verified, Claude Code 2.1.198)
 
 A temporary catch-all dump hook was installed for 11 candidate event names around a
@@ -35,11 +47,12 @@ compaction in a 2-turn run) — not wired here; add them the same way if a futur
 consumer needs them.
 
 **Hook stdin carries no timestamp** — confirmed empty across all 8 payloads above;
-`ledger.sh` injects `ts` itself via `date -u`.
+`ledger.py` injects `ts` itself (`datetime.now(timezone.utc)`, formatted to match
+`date -u +%Y-%m-%dT%H:%M:%SZ`).
 
 **No timestamp needed for the workspace root either**: every payload carries `.cwd`,
 and the hook's own environment carries a matching `CLAUDE_PROJECT_DIR` — both
-verified identical to the shell's actual `$PWD` at hook-execution time. `ledger.sh`
+verified identical to the shell's actual `$PWD` at hook-execution time. `ledger.py`
 uses `.cwd` from stdin first, `$CLAUDE_PROJECT_DIR` as fallback.
 
 **The `agent-<id>.meta.json` sidecar is real**, not hypothetical: for the probed
@@ -103,32 +116,49 @@ of `docs/roadmap-v2.md` for the reproduction command.
 - `.delegator/events.jsonl` — one compact JSON line per observed event, in the
   **workspace** (the campaign's cwd), not this repo. Truncates any string field over
   400 chars, rotates the file to `events.jsonl.<UTC-timestamp>.bak` at ~5MB, appends
-  under `flock`. Never blocks or fails the tool call it observes (`ledger.sh` always
-  exits 0).
-- `.delegator/registry.json` — re-folded from the ledger on every hook invocation
-  (`fold-registry.py`), keyed by `agent_id`: `{name, agent_type, depth, description,
-  status: active|stopped|unknown, first_seen, last_event, last_event_type,
-  session_id, last_summary}`. `status` and liveness (`last_event`) come from the
-  ledger; `name`/`agent_type`/`depth`/`description` prefer the harness's own
-  `meta.json` sidecar when it's readable.
+  under an `fcntl.flock` (2-second acquire timeout, polled — Python has no native
+  blocking-with-timeout flock). Never blocks or fails the tool call it observes
+  (`ledger.py` always exits 0, including on a lock-acquire timeout: it just skips
+  that one event rather than wait indefinitely).
+- `.delegator/registry.json` — re-folded from the ledger in the same process, right
+  after the append (`ledger.py`'s `fold_registry()`), keyed by `agent_id`: `{name,
+  agent_type, depth, description, status: active|stopped|unknown, first_seen,
+  last_event, last_event_type, session_id, last_summary}`. `status` and liveness
+  (`last_event`) come from the ledger; `name`/`agent_type`/`depth`/`description`
+  prefer the harness's own `meta.json` sidecar when it's readable. The read-existing
+  → merge → write of this file happens under one `fcntl.flock` acquisition (a fix
+  made while porting from the original two-process shell/jq design, which read the
+  existing registry *before* taking its write lock — letting two concurrent folds
+  both merge onto the same stale snapshot and the second writer silently discard the
+  first's update). The fold tolerates the registry being in ANY pre-existing shape —
+  this script's own `{"agents": {...}}` dict, the delegator's hand-written
+  `{"version":N,"orchestrators":[...]}` list, or a bare top-level list — merging by
+  `agent_id` and always writing back in whichever shape was already on disk (never
+  silently converting one to the other); a shape-naive earlier version of this fold
+  was confirmed live to CLOBBER a list-shaped file outright (`existing.get("agents",
+  {})` on a dict with no `"agents"` key returns the empty default, not an error, so
+  the old fail-open contract alone didn't catch it) — see `_normalize_existing()`'s
+  docstring in `ledger.py` for the full account.
 
 ### Open question this raises for `agents/delegator.md`
 
 `agents/delegator.md`'s Registry section calls the delegator itself **"the ONLY
 writer"** of `.delegator/registry.json`, holding hand-curated fields this hook never
-produces (`purpose`, `cwd`, `handoff_file`, `staleness_flags`). `fold-registry.py`
-is deliberately **merge-aware** — per `agent_id`, it only sets the mechanical keys
-it derives and leaves every other key untouched — so a concurrent delegator write
-and a hook-driven fold are additive rather than destructive. That's a pragmatic
-compromise, not a real concurrency fix, and it means delegator.md's "ONLY writer"
-claim is no longer strictly true once this hook is enabled. Whether delegator.md
-should be updated to describe registry.json as hook-derived-plus-annotated (letting
-the delegator only ever *patch* judgment fields onto existing rows) is a decision
-for whoever owns that charter — flagged here rather than decided unilaterally.
+produces (`purpose`, `cwd`, `handoff_file`, `staleness_flags`). `ledger.py`'s
+`fold_registry()` is deliberately **merge-aware** — per `agent_id`, it only sets the
+mechanical keys it derives and leaves every other key untouched — so a concurrent
+delegator write and a hook-driven fold are additive rather than destructive. That's
+a pragmatic compromise, not a full concurrency fix (the delegator's own write path
+isn't itself lock-protected), and it means delegator.md's "ONLY writer" claim is no
+longer strictly true once this hook is enabled. Whether delegator.md should be
+updated to describe registry.json as hook-derived-plus-annotated (letting the
+delegator only ever *patch* judgment fields onto existing rows) is a decision for
+whoever owns that charter — flagged here rather than decided unilaterally.
 
 ## Dead-man watchdog (N2)
 
-`watchdog.sh` tails `.delegator/events.jsonl` and prints one line per anomaly:
+`watchdog.py` (stdlib `json`/`datetime`, no `jq`) reads `.delegator/events.jsonl`
+and prints one line per anomaly:
 
 ```
 WATCHDOG: <type> <agent> <evidence>
@@ -139,13 +169,13 @@ delegator arms it itself as a background `Bash` job at session start:
 
 ```bash
 DELEGATOR_REPO=/path/to/claude-code-delegator
-nohup "$DELEGATOR_REPO/hooks/watchdog.sh" "$PWD" >> .delegator/watchdog.log 2>&1 &
+nohup python3 "$DELEGATOR_REPO/hooks/watchdog.py" "$PWD" >> .delegator/watchdog.log 2>&1 &
 ```
 
 Run it in the foreground for a one-off check instead:
 
 ```bash
-"$DELEGATOR_REPO/hooks/watchdog.sh" "$PWD"
+python3 "$DELEGATOR_REPO/hooks/watchdog.py" "$PWD"
 ```
 
 Anomaly types it currently detects — both read straight from `.delegator/events.jsonl`,
