@@ -77,15 +77,7 @@ cd <your-workspace>
 claude --agent delegator          # the whole session becomes a delegator
 ```
 
-**No terminal? (desktop app / VS Code):** just say `activate delegator` in any chat — the bundled `delegator-activate` skill adopts the delegator charter for **that session only** (prompt-level, zero config changes; `deactivate delegator` switches it off). It never writes any file, even if you ask to make it permanent.
-
-**Want it permanent for a workspace?** Add this to the workspace's `.claude/settings.local.json` yourself:
-
-```json
-{ "agent": "delegator" }
-```
-
-> ⚠️ **Blast radius (live-verified):** the `agent` key converts every NEW chat **and every RESUMED old chat** in that workspace — sessions already running are unaffected until resumed. Use `settings.local.json` (personal, untracked), not `settings.json` — the project file is typically git-committed and would silently switch your teammates' sessions too. The key is undocumented but real (the `--agent` flag's own help references it); project/local scope works, user scope does not.
+**No terminal? (desktop app / VS Code):** just say `activate delegator` in any chat — the bundled `delegator-activate` skill adopts the delegator charter for **that session only** (prompt-level, zero config changes; `deactivate delegator` switches it off). It never writes any file, even if you ask to make it permanent — a workspace-wide switch exists but is manual-only (see the FAQ).
 
 Or spawn a single orchestrator from any normal session:
 
@@ -171,6 +163,11 @@ Launch it as the delegator: it only converses, routes, answers gates, and bookke
 <details><summary><b>When is this overkill?</b></summary>
 
 Bounded single tasks with a trusted skill — a plain session is ~3× cheaper there. Use the delegator for campaigns, gated/risky work, and deep multi-stage chains.
+</details>
+
+<details><summary><b>Can I make a whole workspace default to the delegator (no flag, no skill)?</b></summary>
+
+Yes — manual-only, deliberately: add `{ "agent": "delegator" }` to the workspace's `.claude/settings.local.json` yourself. ⚠️ **Blast radius (live-verified):** the `agent` key converts every NEW chat **and every RESUMED old chat** in that workspace — sessions already running are unaffected until resumed. Use `settings.local.json` (personal, untracked), never the git-shared `settings.json` — the project file would silently switch your teammates' sessions too. The key is undocumented but real (the `--agent` flag's own help references it); project/local scope works, user scope does not. The bundled skill refuses to write this for you by design — session-scoped activation only.
 </details>
 
 ## 🗃️ Repo map
