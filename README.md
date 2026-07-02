@@ -36,6 +36,7 @@ This repo is the source of truth — edit here, re-run `install.sh` to deploy. A
 - **Teammates cannot spawn NAMED children** — rejected at the API: `Teammates cannot spawn other teammates — the team roster is flat.` (One same-day probe succeeded → variance is real; design on the blocked side.)
 - **A teammate's unnamed children launch ASYNC**, not blocking → **collect-in-turn**: launch all independent children, keep working, poll each child's `output_file` with a narrow sentinel grep. **Never end a turn with children outstanding** — completion notifications reach ONLY the top session; a resting teammate is never woken by them.
 - **Deep gates work**: a depth-2 agent's `SendMessage(to:"main")` delivers to the top session, and the answer sent to its `agentId` revives it to finish (P-J).
+- **Rest-with-ping**: an explicit child→parent `SendMessage(to:"<parent-name>")` DOES wake a rested named parent (P-K) — bare completions never do. Second wait pattern for long-running children; orphan risk covered by the delegator's watchdog nudge.
 - **Agents survive process exits**: `SendMessage(agentId)` revives a rested/orphaned agent from its on-disk transcript — even after the spawning process died and the session resumed under a new session id, with full context retained.
 - **fork → fork ✗**; named → self-fork ✓; main (model-initiated) → fork ✓ with fresh budget and full context inheritance.
 - **Named agents don't know their own name** — every brief opens with "You are <name>".
