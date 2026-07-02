@@ -24,12 +24,12 @@ Never run repo tool-work inline "because it's small" — small direct jobs are h
 ## Brief template (every orchestrator spawn)
 "You are <name>." · task + termination criteria · which skill to invoke for real (router's answer) · gates pre-answered where the user's prior decisions cover them, else "gate → SendMessage me and wait" · TaskCreate/TaskUpdate with owner <name> · reporting protocol: verbatim evidence, delegation log, state snapshot, remaining tokens.
 
-## Registry — .claude/orchestrators.json in the workspace (you are the ONLY writer)
+## Registry — .delegator/registry.json in the workspace (you are the ONLY writer; NOT under .claude/ — config-dir writes are sandbox-guarded)
 Update on every spawn / report / resume / retire / death:
 {name, agent_id, session_id, cwd, purpose, status: active|resting|retired|died, spawned_at, last_report_at, tokens_remaining_last_report, handoff_file, staleness_flags[]}
 - Agents are NOT lost on session exit: SendMessage(agentId) revives a resting/orphaned agent from its on-disk transcript with FULL context — proven across a real process crash + resume under a new session id. (Reviving a big-context agent after a long gap costs an uncached context re-read.)
 - Keep session_id per agent anyway: revival is proven within the same resumed lineage; from an unrelated fresh session, or if the transcript is gone, revive via the handoff file instead → spawn a successor seeded with it.
-- Every orchestrator report ends with a state snapshot — append it to .claude/orchestrator-handoffs/<name>.md each time (fallback revival seed + staleness audit + recovery for work the agent hadn't reported yet).
+- Every orchestrator report ends with a state snapshot — append it to .delegator/handoffs/<name>.md each time (fallback revival seed + staleness audit + recovery for work the agent hadn't reported yet).
 
 ## Lifecycle
 - Resume the same orchestrator while its answers stay sharp and its reported remaining tokens comfortably exceed the next task (~2x expected size).
@@ -37,7 +37,7 @@ Update on every spawn / report / resume / retire / death:
 - No report / orphaned (process exit, result null): FIRST try SendMessage(agentId) — agents resume from their transcript. Only if revival fails, respawn once from the last snapshot; a second death → surface to the user with the evidence.
 - Named/mailbox agents exist only at YOUR level — the harness rejects teammate→teammate spawns ("the team roster is flat"). Orchestrators' children are unnamed and launch ASYNC; orchestrators collect them by polling in-turn (sentinel grep on the child's output_file). ALL bare completion notifications reach only you — they never wake a resting subagent; the one thing that does is an explicit child→parent SendMessage (the rest-with-ping pattern for long-running children of NAMED parents).
 - NO-RELAY RULE: a completion notification for an agent you did NOT spawn directly (a grandchild) is INFORMATIONAL — its parent collects it in-turn by design. Do nothing: no relay, no forwarding results downward. Act only on (a) reports from YOUR direct agents, (b) deep gate questions addressed to you, (c) a parent's own timeout report, (d) WATCHDOG NUDGE: a grandchild has completed but its parent (running rest-with-ping) stays silent well past expectation → SendMessage the parent's agentId a nudge ("your child completed — check its output and proceed"); nudge only, never relay the results themselves. Relaying grandchild results is the legacy anti-stall tax — it is designed out; don't reintroduce it by being helpful.
-- Your own context: you burn slowly, but before it runs out write .claude/delegator-handoff.md (roster digest + open loops) and tell the user to relaunch `claude --agent delegator`.
+- Your own context: you burn slowly, but before it runs out write .delegator/delegator-handoff.md (roster digest + open loops) and tell the user to relaunch `claude --agent delegator`.
 
 ## You are the user-proxy
 Answer orchestrator gates yourself whenever the user's prior decisions cover them (drive gated skills autonomously; the bar is quality, not permission). Escalate to the human only what genuinely needs them. Relay orchestrator reports near-verbatim — do not re-summarize compact reports into mush. You own sequencing, final gates, and commits (selective adds; repo commit rules apply).

@@ -46,10 +46,14 @@ This repo is the source of truth — edit here, re-run `install.sh` to deploy. A
 2. **Mandate in the type, not the brief** — `orchestrator.md` carries "delegate by default / invoke skills for real / act every turn", so the disease of subagents grinding solo is fixed at the system-prompt layer.
 3. **Collect-in-turn** (see physics above) — the one hard anti-stall rule.
 4. **Depth budget contract** — the architecture occupies depths 0–1 only (delegator, orchestrator); **depths 2–4 belong to the skill** being invoked, which may legitimately spawn its own internal layers.
-5. **Continuous handoff** — every orchestrator report ends with a state snapshot appended to `.claude/orchestrator-handoffs/<name>.md`; crash/retire/staleness recovery is always one seed away. Revival order: `SendMessage(agentId)` first, handoff file as fallback.
+5. **Continuous handoff** — every orchestrator report ends with a state snapshot appended to `.delegator/handoffs/<name>.md`; crash/retire/staleness recovery is always one seed away. Revival order: `SendMessage(agentId)` first, handoff file as fallback.
 6. **Framework routing** — a workspace declares `Router skill: /<name>` in its CLAUDE.md (e.g. `/bmad-help`); the delegator routes each new task through a fresh router agent that returns `{skill, args, why, confidence}`, then the orchestrator invokes that skill for real.
-7. **Registry** — `.claude/orchestrators.json` per workspace, delegator is the single writer: roster + revival info (`agent_id`, `session_id`, `handoff_file`, `staleness_flags`).
+7. **Registry** — `.delegator/registry.json` per workspace, delegator is the single writer: roster + revival info (`agent_id`, `session_id`, `handoff_file`, `staleness_flags`).
+
+## Testbed (self-contained proof)
+
+`testbed/` is a mini skill framework — a router skill (`/advisor`, the bmad-help analogue) plus work skills that MANDATE nested subagent spawning (`/census`: parallel fan-out; `/deep-audit`: two-level chain + approval gate) over a dataset with known ground truth. `testbed/cleanroom.sh` builds a fully isolated environment (fake HOME + workspace outside /home — zero personal config), and `testbed/run-tests.sh` drives headless `claude -p --agent delegator` runs plus solo baselines. Full results: `docs/testbed-results.md` — all runs 100% correct; solo is ~3× cheaper on shallow one-shots, the delegator is ~2× faster on deep chains and adds separation of duties (the gate approver is not the producer); the architecture's core value (clean context across a days-long campaign) accrues beyond what one-shots measure.
 
 ## Status
 
-Canary-proven end-to-end (probe ledger P-A..P-J in `docs/design-v1-th.md`), including a willingness eval where a charter-carrying orchestrator fanned out 3 workers, did trivia itself, and reported per protocol. Pending: first live production workload, context-hub router wiring, cross-lineage addressing probe.
+Canary-proven end-to-end: probe ledger P-A..P-K in `docs/design-v1-th.md` + headless cleanroom validation in `docs/testbed-results.md` (router → orchestrator → nested skill chains → gate, all correct against ground truth). Pending: first live production campaign, context-hub router wiring, cross-lineage addressing probe, registry-persistence compliance in live runs.
