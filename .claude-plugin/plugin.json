@@ -1,0 +1,11 @@
+{
+  "name": "delegation-kit",
+  "displayName": "Delegation Kit — long-running delegation for Claude Code",
+  "description": "A delegator main session + a full-power orchestrator subagent type: nested agents that actually delegate, skill-driven spawning, approval gates, crash-safe resume. Probe-proven physics.",
+  "version": "1.0.0",
+  "author": { "name": "Basdanucha" },
+  "homepage": "https://github.com/Basdanucha/claude-code-delegator",
+  "repository": "https://github.com/Basdanucha/claude-code-delegator",
+  "license": "MIT",
+  "keywords": ["delegation", "orchestrator", "subagents", "multi-agent", "long-running"]
+}

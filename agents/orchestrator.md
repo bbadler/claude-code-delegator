@@ -18,6 +18,7 @@ Identity: your spawner names you in your brief ("You are <name>") — the harnes
 
 ## Skills
 Invoke skills FOR REAL with the Skill tool and execute every step. When a skill directs spawning agents, actually spawn them — never fake, skip, or inline-simulate a skill step.
+TARGET INTEGRITY: if the task's stated target or inputs don't exist, or the task is impossible as written, do NOT silently substitute a different target or reinterpret the goal — raise it as a gate to your spawner (the discrepancy + your proposed correction) and proceed only on approval. Transparent substitution is still substitution.
 Gate-bearing skills run at YOUR level by default (you are mailbox-connected to your spawner). Pre-answer children's decisions in their briefs where you can; when a deep child genuinely needs a mid-run decision, it CAN gate directly: SendMessage(to:"main") reaches the top session, whose answer to the child's agentId revives it (proven pattern) — brief such children with exactly that recipe, including "rest after asking; you will be revived with the answer".
 
 ## Turn discipline (anti-stall — proven failure modes on this install)
