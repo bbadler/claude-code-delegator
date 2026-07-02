@@ -66,7 +66,8 @@ flowchart TD
 
 ```bash
 git clone https://github.com/bbadler/claude-code-delegator && cd claude-code-delegator
-./install.sh          # copies agents/*.md into ~/.claude/agents/  (./install.sh --verify | --uninstall)
+./install.sh          # agents/*.md → ~/.claude/agents/ + the delegator-activate skill
+                      # (--verify | --uninstall | --skill-only [--uninstall] — skill work never touches agent defs)
 ```
 
 **Then:**
@@ -104,6 +105,7 @@ Optional, per workspace: declare a router in the workspace `CLAUDE.md` — `Rout
 | **Lost campaigns on crash or restart** | agents revive from their on-disk transcripts via `SendMessage(agentId)` — proven across a real process kill — plus continuous state snapshots as the fallback seed |
 | **Registries that agents "forget" to write** | harness **hooks** append every spawn/stop to `.delegator/events.jsonl` and fold a registry from it — deterministic, no model discipline required ([`hooks/`](hooks/README.md)) |
 | **Reports you can't trust** | the delegator ships a **skeptical-operator doctrine**: reports are claims; load-bearing facts get spot-checked by cold agents; irreversible actions require independent verification |
+| **Mid-flight spec changes that get ignored** — you message a busy agent a correction; it finishes the *old* plan first (messages queue until its turn ends) | **amendment protocol**: briefs live in spec *files* (`.delegator/specs/` + `spec_version`) — re-readable mid-turn, unlike messages; breaking changes = stop-then-amend; the rule cascades to workers (abandon-and-respawn + triage, never merge stale-spec results) |
 
 ## 🔬 Probe-proven physics
 
@@ -176,14 +178,15 @@ Bounded single tasks with a trusted skill — a plain session is ~3× cheaper th
 | path | what it is |
 |---|---|
 | [`agents/`](agents/) | `delegator.md` (the switch) · `orchestrator.md` (the workhorse type) · `worker.md` (lean leaf) |
+| [`skills/`](skills/) | `activate/` — the `delegator-activate` skill: say "activate delegator" in any chat, session-only, zero config writes (built + evaled through the real skill-creator flow) |
 | [`hooks/`](hooks/README.md) | event ledger → derived registry (`ledger.py`) + dead-man `watchdog.py` — opt-in, stdlib-only, macOS-portable |
-| [`testbed/`](testbed/) | cleanroom + graded test suites (`cleanroom.sh`, `run-tests.sh`, `stress-tests.sh`) |
+| [`testbed/`](testbed/) | cleanroom + graded suites: `cleanroom.sh` · `run_all.py` (graded runner) · `run-tests.sh` · `stress-tests.sh` |
 | [`docs/`](docs/) | design (TH) · testbed results · roadmap v2 · [BMAD adapter](docs/adapters/bmad.md) |
 | [`.claude-plugin/`](.claude-plugin/) | plugin + single-repo marketplace manifests (`claude plugin validate .` passes) |
 
 ## 🏗️ How this was built
 
-Probe-first, adversarially: every harness behavior was measured on a live install before any rule was written on it; a multi-lens ideation pass with adversarial judging produced the [roadmap](docs/roadmap-v2.md); and the human operator overruled the AI designer **five times in one day** — fork-first micro-jobs, agent revival across restarts, async children, depth budgets, deep gates — each overrule settled by a probe, not an argument, and shipped. The skeptical-operator doctrine in `delegator.md` is that behavior, codified.
+Probe-first, adversarially: every harness behavior was measured on a live install before any rule was written on it; a multi-lens ideation pass with adversarial judging produced the [roadmap](docs/roadmap-v2.md); and the human operator overruled the AI designer **seven times in two days** — fork-first micro-jobs, agent revival across restarts, async children, depth budgets, deep gates, per-report handoff files cut as token waste, and the mid-flight amendment protocol — each overrule settled by a probe, not an argument, and shipped. The skeptical-operator doctrine in `delegator.md` is that behavior, codified.
 
 ## 🤝 Prior art
 
