@@ -20,28 +20,35 @@
 
 ```mermaid
 flowchart TD
-    U([👤 operator]) <-->|converse · gates · steering| D
+    U["👤 operator"] -->|"tasks, gate answers"| D
+    D -->|"reports, gate questions"| U
 
-    subgraph MAIN["🎛️ delegator — main session, context stays clean for days"]
-        D{route it}
+    subgraph MAIN["🎛️ delegator - main session, context stays clean for days"]
+        D{"route it"}
     end
 
-    D -->|new task| R[🧭 router agent<br/>invokes workspace's Router skill]
-    R -->|"{skill, args, why, confidence}"| D
-    D -->|substantive work| O1
-    D -->|micro side-quest| F[🍴 self-fork<br/>absorbs raw output]
-    D -.->|"revive anytime — SendMessage(agentId)"| O2
+    D -->|"new task"| R["🧭 router agent<br/>invokes the workspace Router skill"]
+    R -->|"skill + args + confidence"| D
+    D -->|"substantive work"| O1
+    D -->|"micro side-quest"| F["🍴 self-fork<br/>absorbs raw output"]
+    D -.->|"revive anytime: SendMessage agentId"| O2
 
-    subgraph WORK["orchestrators — full-power, delegation mandate in the TYPE"]
-        O1[⚙️ orch: census-run] --> W1[worker] & W2[worker]
-        O2[⚙️ orch: facts-audit] --> A[auditor] --> V1[verifier] & V2[verifier] & V3[verifier]
+    subgraph WORK["orchestrators - delegation mandate lives in the TYPE"]
+        O1["⚙️ orch: census-run"] --> W1["worker"]
+        O1 --> W2["worker"]
+        O2["⚙️ orch: facts-audit"] --> A["auditor"]
+        A --> V1["verifier"]
+        A --> V2["verifier"]
+        A --> V3["verifier"]
     end
 
     O2 -->|"GATE: publish findings?"| D
-    W1 & W2 -->|"RESULT: sentinel · collect-in-turn"| O1
+    W1 -->|"RESULT sentinel, collect-in-turn"| O1
+    W2 -->|"RESULT sentinel, collect-in-turn"| O1
 
-    O1 & O2 -.->|hooks write events.jsonl| L[("🧾 .delegator/<br/>ledger + registry + handoffs")]
-    L -.->|watchdog + revival seed| D
+    O1 -.->|"hooks append events"| L[("🧾 .delegator/ ledger + registry + handoffs")]
+    O2 -.-> L
+    L -.->|"watchdog + revival seed"| D
 ```
 
 ## ⚡ Quick start
