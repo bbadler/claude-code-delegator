@@ -76,6 +76,12 @@ cd <your-workspace>
 claude --agent delegator          # the whole session becomes a delegator
 ```
 
+**No terminal? (desktop app / VS Code):** add this to your workspace's `.claude/settings.json` — every NEW chat in that workspace starts as the delegator, and RESUMING an old chat converts it too (live-verified; the setting is undocumented but the `--agent` flag's own help references it — project scope works, user scope does not):
+
+```json
+{ "agent": "delegator" }
+```
+
 Or spawn a single orchestrator from any normal session:
 
 ```
