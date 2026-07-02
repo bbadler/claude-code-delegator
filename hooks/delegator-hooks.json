@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Agent|SendMessage",
+        "hooks": [{"type": "command", "command": "__DELEGATOR_REPO__/hooks/ledger.sh"}]
+      }
+    ],
+    "SubagentStart": [
+      {"hooks": [{"type": "command", "command": "__DELEGATOR_REPO__/hooks/ledger.sh"}]}
+    ],
+    "SubagentStop": [
+      {"hooks": [{"type": "command", "command": "__DELEGATOR_REPO__/hooks/ledger.sh"}]}
+    ],
+    "TeammateIdle": [
+      {"hooks": [{"type": "command", "command": "__DELEGATOR_REPO__/hooks/ledger.sh"}]}
+    ]
+  }
+}

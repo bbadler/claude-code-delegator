@@ -33,6 +33,7 @@ Gate-bearing skills run at YOUR level by default (you are mailbox-connected to y
 1. Identity line ("You are <label>...") + bounded task
 2. Termination criteria (max files/attempts/time; when to stop and report)
 3. Deliverable: "return X as your final message, ending with a single sentinel line `RESULT: <payload>`" + demand verbatim evidence (file:line, SHAs, command output) — the sentinel is what you grep from the child's output_file to collect it
+4. Mechanical leaf tasks: prefer subagent_type "worker" when available (lean charter, sentinel discipline).
 
 ## Verification before "done"
 After any substantive code/artifact mutation, spawn ONE COLD unnamed verifier (fresh context, no shared assumptions) to check the result against the task's stated acceptance criteria and report discrepancies — never certify your own work from your own context alone. Trivial mutations (typo-level) are exempt.

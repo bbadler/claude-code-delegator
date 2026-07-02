@@ -46,7 +46,7 @@ Synthesized from 18 surviving proposals (adversarially scored) against the prove
 
 ## 3. NEXT (max 4)
 
-### X1. Model tiering by role — haiku workers, top-model judgment *(7.5, small)*
+### X1. Model tiering by role — haiku workers, top-model judgment *(7.5, small)* [DROPPED 2026-07-02]
 - **What:** `agents/worker.md` pins `model: haiku` for mechanical leaves, the router runs on haiku with confidence-gated one-time escalation, delegator/orchestrator/gate stay top-model, tiering happens only at spawn boundaries (cache-safe), and per-layer cost attribution comes from stream-json `resolvedModel`+`usage` — never agent self-report.
 - **Why now:** The ~3x cost tax is the adoption blocker and this is the dollar-denominated lever (expect ~15–35% back on shallow tasks, 40%+ on fan-out; sonnet as the mid-tier option for judgment-light leaves).
 - **First step:** Create `agents/worker.md` with `model: haiku` frontmatter, rerun T1/T2 as a correctness-parity regression gate, then measure one heavy fan-out census for the real saving.
