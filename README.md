@@ -118,7 +118,7 @@ Every mechanical claim below was verified by a live probe on a real install (Cla
 2. **Mandate in the type, not the brief** — plus *target integrity* (never silently substitute a task's target) and a *verifier duty* (cold agent checks mutations; never self-certify).
 3. **Collect-in-turn / rest-with-ping** — the two proven wait patterns; never rest expecting a completion notification.
 4. **Depth budget contract** — the architecture occupies depths 0–1 only; **depths 2–4 belong to the skill** being invoked, which may legitimately spawn its own internal layers.
-5. **Continuous handoff** — every report ends with a state snapshot appended to `.delegator/handoffs/<name>.md`; revival order: `SendMessage(agentId)` first, snapshot seed as fallback.
+5. **Transcripts are the handoff** — every report carries a compact state snapshot (the delegator's live digest), but no per-report handoff files are maintained: revival is `SendMessage(agentId)` from the on-disk transcript (proven across process death), and when revival is impossible the last snapshot is harvested from the transcript on demand. Handoff files exist only at deliberate retirement.
 6. **Framework routing** — the workspace's own skill framework decides *which* skill runs; the *skill* directs its own nested spawning.
 7. **Skeptical-operator doctrine** — a verification ladder by stakes, auto-escalation on "too clean" reports, and a trust ledger in the registry. Modeled on a human operator who overruled this design five times in one day — every overrule probe-verified.
 
