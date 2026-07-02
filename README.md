@@ -46,7 +46,7 @@ flowchart TD
     W1 -->|"RESULT sentinel, collect-in-turn"| O1
     W2 -->|"RESULT sentinel, collect-in-turn"| O1
 
-    O1 -.->|"hooks append events"| L[("🧾 .delegator/ ledger + registry + handoffs")]
+    O1 -.->|"hooks append events"| L[("🧾 .delegator/ ledger + registry")]
     O2 -.-> L
     L -.->|"watchdog + revival seed"| D
 ```
