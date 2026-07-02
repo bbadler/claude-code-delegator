@@ -18,6 +18,8 @@
 
 ---
 
+> **Built for the native-nesting era.** Claude Code supports subagents spawning their own subagents as a first-class feature (since v2.1.172, June 2026) — everything here drives that capability directly: agent types, mailboxes, on-disk transcripts, hooks. **No headless `claude -p` shell-out workarounds** of the kind pre-nesting orchestrators needed. (The only `claude -p` in this repo is the test harness, exercising the architecture from the outside.)
+
 ```mermaid
 flowchart TD
     U["👤 operator"] -->|"tasks, gate answers"| D
