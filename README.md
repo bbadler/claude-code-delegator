@@ -164,7 +164,7 @@ Bounded single tasks with a trusted skill — a plain session is ~3× cheaper th
 | path | what it is |
 |---|---|
 | [`agents/`](agents/) | `delegator.md` (the switch) · `orchestrator.md` (the workhorse type) · `worker.md` (lean leaf) |
-| [`hooks/`](hooks/README.md) | event ledger → derived registry (`ledger.sh`, `fold-registry.py`) + dead-man `watchdog.sh` — opt-in |
+| [`hooks/`](hooks/README.md) | event ledger → derived registry (`ledger.py`) + dead-man `watchdog.py` — opt-in, stdlib-only, macOS-portable |
 | [`testbed/`](testbed/) | cleanroom + graded test suites (`cleanroom.sh`, `run-tests.sh`, `stress-tests.sh`) |
 | [`docs/`](docs/) | design (TH) · testbed results · roadmap v2 · [BMAD adapter](docs/adapters/bmad.md) |
 | [`.claude-plugin/`](.claude-plugin/) | plugin + single-repo marketplace manifests (`claude plugin validate .` passes) |
