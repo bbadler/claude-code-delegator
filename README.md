@@ -66,7 +66,7 @@ flowchart TD
 
 ```bash
 git clone https://github.com/bbadler/claude-code-delegator && cd claude-code-delegator
-./install.sh          # agents/*.md → ~/.claude/agents/ + the delegator-activate skill
+./install.sh          # agents/*.md → ~/.claude/agents/ + the delegator-mode skill
                       # (--verify | --uninstall | --skill-only [--uninstall] — skill work never touches agent defs)
 ```
 
@@ -77,7 +77,7 @@ cd <your-workspace>
 claude --agent delegator          # the whole session becomes a delegator
 ```
 
-**No terminal? (desktop app / VS Code):** just say `activate delegator` in any chat — the bundled `delegator-activate` skill adopts the delegator charter for **that session only** (prompt-level, zero config changes; `deactivate delegator` switches it off). It never writes any file, even if you ask to make it permanent — a workspace-wide switch exists but is manual-only (see the FAQ).
+**No terminal? (desktop app / VS Code):** just say `activate delegator` in any chat — the bundled `delegator-mode` skill adopts the delegator charter for **that session only** (prompt-level, zero config changes; `deactivate delegator` switches it off). It never writes any file, even if you ask to make it permanent — a workspace-wide switch exists but is manual-only (see the FAQ).
 
 Or spawn a single orchestrator from any normal session:
 
@@ -175,7 +175,7 @@ Yes — manual-only, deliberately: add `{ "agent": "delegator" }` to the workspa
 | path | what it is |
 |---|---|
 | [`agents/`](agents/) | `delegator.md` (the switch) · `orchestrator.md` (the workhorse type) · `worker.md` (lean leaf) |
-| [`skills/`](skills/) | `activate/` — the `delegator-activate` skill: say "activate delegator" in any chat, session-only, zero config writes (built + evaled through the real skill-creator flow) |
+| [`skills/`](skills/) | `delegator-mode/` — say "activate delegator" in any chat: session-only switch, zero config writes (built + evaled through the real skill-creator flow) |
 | [`hooks/`](hooks/README.md) | event ledger → derived registry (`ledger.py`) + dead-man `watchdog.py` — opt-in, stdlib-only, macOS-portable |
 | [`testbed/`](testbed/) | cleanroom + graded suites: `cleanroom.sh` · `run_all.py` (graded runner) · `run-tests.sh` · `stress-tests.sh` |
 | [`docs/`](docs/) | design (TH) · testbed results · roadmap v2 · [BMAD adapter](docs/adapters/bmad.md) |

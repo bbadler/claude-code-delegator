@@ -1,5 +1,5 @@
 ---
-name: activate
+name: delegator-mode
 description: Turn THIS session into the delegator (session-only; no config changes) — the long-running main session that routes substantive work to orchestrators instead of grinding solo. Zero-terminal alternative to relaunching `claude --agent delegator` from a shell. Also handles the matching deactivate switch. Use whenever the user says "activate delegator", "delegator mode", "make this session a delegator", "deactivate delegator", or "delegator off" — this skill never writes any file, even if asked to make the switch permanent.
 ---
 

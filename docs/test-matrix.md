@@ -115,7 +115,7 @@ grading-logic drift between the two runner implementations.
   delegator's own transcript to confirm it stayed zero-tool; every test only observes
   downstream artifacts.
 - **`--plugin-dir <path>` alone does not grant file-read access to that path in headless
-  `claude -p` mode** — confirmed live while building `skills/activate/SKILL.md`: a
+  `claude -p` mode** — confirmed live while building `skills/delegator-mode/SKILL.md`: a
   session loaded via `--plugin-dir /abs/path/to/this/repo` correctly saw the plugin's
   namespaced agent types and skill, but a subsequent `Read`/`Bash cat` of a file inside
   that same directory (the skill instructing it to read `../../agents/delegator.md`)
@@ -128,7 +128,11 @@ grading-logic drift between the two runner implementations.
   without any extra flag) — anyone dev-testing a plugin's own bundled files (charter
   docs, scripts, references) headless via `--plugin-dir` should expect to need
   `--add-dir` too, and should not assume a clean `--plugin-dir`-only repro is safe to
-  skip.
+  skip. Related headless-eval gotcha (same class): a bare `claude -p` with no
+  permission pre-grants stalls on an unanswerable approval prompt the first time the
+  skill `Read`s the charter file in a fresh scratch workspace — automated evals need
+  `--allowedTools Read` (and note that flag eats a trailing positional prompt, so pipe
+  the prompt via stdin). Interactive users never see either issue.
 - **The router's actual decision is never independently checked.** Every test phrases
   tasks so the *correct* route is unambiguous (e.g. "produce a census" for the `census`
   skill), so a silently-wrong router response could still produce a passing test if the

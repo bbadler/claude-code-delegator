@@ -3,8 +3,14 @@ set -euo pipefail
 cd "$(dirname "$0")"
 dest="$HOME/.claude/agents"
 defs=(delegator orchestrator worker)
-skill_src="skills/activate"
-skill_dest="$HOME/.claude/skills/delegator-activate"
+skill_src="skills/delegator-mode"
+skill_dest="$HOME/.claude/skills/delegator-mode"
+# Old (pre-rename) install location -- migrated away from on every install, see
+# the migration block in install_skill() below. The skill used to install as
+# "delegator-activate"; the plugin registered it as "delegation-kit:activate" --
+# two different names for one skill was confusing in a mixed skill list, so both
+# now converge on "delegator-mode".
+old_skill_dest="$HOME/.claude/skills/delegator-activate"
 # Skill backups must NEVER live under ~/.claude/skills/ as a SKILL.md-bearing
 # directory -- Claude Code's skill discovery scans every directory there for a
 # SKILL.md and registers whatever it finds, so a plain
@@ -23,12 +29,20 @@ install_skill() {
   mkdir -p "$(dirname "$skill_dest")"
   if [ -d "$skill_dest" ] && ! diff -r "$skill_src" "$skill_dest" >/dev/null 2>&1; then
     mkdir -p "$skill_backup_dir"
-    mv "$skill_dest" "$skill_backup_dir/delegator-activate.$(date +%s)"
-    echo "backed up existing delegator-activate skill -> $skill_backup_dir"
+    mv "$skill_dest" "$skill_backup_dir/delegator-mode.$(date +%s)"
+    echo "backed up existing delegator-mode skill -> $skill_backup_dir"
   fi
   if [ ! -d "$skill_dest" ]; then
     cp -r "$skill_src" "$skill_dest"
-    echo "installed skill activate -> $skill_dest (classic /delegator-activate)"
+    echo "installed skill delegator-mode -> $skill_dest (classic /delegator-mode)"
+  fi
+  # Migration from the old name: only remove it AFTER the new one is safely in
+  # place, so a failed install never leaves the user with neither. Otherwise an
+  # upgrader ends up with both "delegator-activate" and "delegator-mode" live at
+  # once -- two names for one skill, the exact confusion this rename fixes.
+  if [ -d "$old_skill_dest" ]; then
+    rm -rf "$old_skill_dest"
+    echo "migrated: removed old skill name delegator-activate ($old_skill_dest) -> use delegator-mode"
   fi
 }
 
@@ -65,13 +79,13 @@ do_verify() {
     fi
   done
   if [ -d "$skill_dest" ] && [ -f "$skill_dest/SKILL.md" ]; then
-    echo "  [ok] skill: delegator-activate ($skill_dest)"
+    echo "  [ok] skill: delegator-mode ($skill_dest)"
   else
-    echo "  [MISSING] skill: delegator-activate ($skill_dest)"
+    echo "  [MISSING] skill: delegator-mode ($skill_dest)"
     status=1
   fi
   if [ "$status" -eq 0 ]; then
-    echo "verify: all agent types and the activate skill are present"
+    echo "verify: all agent types and the delegator-mode skill are present"
   else
     echo "verify: FAILED — see MISSING above" >&2
     echo "--- raw claude -p output ---" >&2
@@ -81,7 +95,7 @@ do_verify() {
 }
 
 uninstall_skill() {
-  latest_skill_bak="$(ls -1d "$skill_backup_dir"/delegator-activate.* 2>/dev/null | sort | tail -1 || true)"
+  latest_skill_bak="$(ls -1d "$skill_backup_dir"/delegator-mode.* 2>/dev/null | sort | tail -1 || true)"
   if [ -d "$skill_dest" ]; then
     rm -rf "$skill_dest"
     echo "removed $skill_dest"

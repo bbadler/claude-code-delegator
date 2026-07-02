@@ -2,6 +2,23 @@
 
 All notable changes to `claude-code-delegator` are documented here.
 
+## v1.1.1 (2026-07-03)
+
+- **Skill renamed to `delegator-mode`**: v1.1.0 shipped the activation skill under
+  two different names — `delegation-kit:activate` via the plugin, `delegator-activate`
+  via classic `install.sh` — which read as two unrelated entries in a mixed skill
+  list. Both now converge on **`delegator-mode`** (`skills/activate/` →
+  `skills/delegator-mode/`, `SKILL.md` `name:` matched, classic install path
+  `~/.claude/skills/delegator-mode/`). Upgrading is automatic — `install.sh` removes
+  the old `~/.claude/skills/delegator-activate/` directory right after installing the
+  new one (never before, so a failed install can't strand a user with neither name);
+  otherwise an upgrader would end up with both names live at once, the exact
+  duplicate-confusion this rename exists to fix. Behavior, triggers, and the
+  never-writes-any-file guarantee are unchanged (post-rename eval re-passed).
+- **`install.sh --skill-only --uninstall`**: the skill's remove/restore-from-backup
+  path can now be exercised end-to-end in isolation from `agents/*.md` (extracted
+  `uninstall_skill()`); complements v1.1.0's `--skill-only` install mode.
+
 ## v1.1.0 (2026-07-03)
 
 ### `/delegation-kit:activate` — in-session activation skill
@@ -42,9 +59,9 @@ All notable changes to `claude-code-delegator` are documented here.
   this repo, no Bash-tool permission workaround needed this time since the skill no
   longer shells out to anything.
 - `install.sh` also installs this skill for classic users
-  (`~/.claude/skills/delegator-activate/`), with matching `--verify` (checks the
-  skill directory exists) and `--uninstall` (backs up / restores it) coverage.
-
+  (`~/.claude/skills/delegator-activate/` as shipped in v1.1.0 — renamed in v1.1.1),
+  with matching `--verify` (checks the skill directory exists) and `--uninstall`
+  (backs up / restores it) coverage.
 ### `hooks/ledger.py` — registry dict/list shape fix
 
 - `fold_registry()`'s merge-onto-existing-registry step assumed the pre-existing
