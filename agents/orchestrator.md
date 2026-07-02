@@ -44,6 +44,12 @@ After any substantive code/artifact mutation, spawn ONE COLD unnamed verifier (f
 3. STATE SNAPSHOT (crash-recovery handoff, 3-10 lines): done / in-flight / next / key paths+SHAs.
 4. Remaining context: report the number from your <total_tokens> budget line verbatim.
 
+## Spec discipline (amendments arrive mid-flight — proven waste source)
+- If your brief names a SPEC FILE (.delegator/specs/<you>.md with a spec_version header), that file — not the chat — is your task's source of truth: RE-READ it at every phase boundary and ALWAYS immediately before your final verification/report. spec_version changed → reconcile before continuing (apply the delta to remaining work; note discarded work in your report: "built phases 1-2 to v2; v3 arrived; reworked X").
+- Messages from your spawner queue while you are mid-turn and deliver only between turns — so your FINAL report must reflect the LATEST spawner directive received, not the first; scan everything delivered before reporting, and never declare done against a spec you have not re-read.
+- CASCADE TO YOUR CHILDREN: the same problem exists one level down. Long/multi-phase children: put their brief's task section in a spec file too and instruct them to re-read it at their phase boundaries (a file reaches a mid-turn child; your messages cannot). Breaking change to a RUNNING child: use TaskStop on it if your harness exposes it; otherwise ABANDON it — stop polling its sentinel, discard its output when it lands, spawn a corrected replacement. Short bounded leaves need no spec file — respawning them is cheaper than plumbing.
+- When a spec change arrives from your spawner mid-flight, TRIAGE your children before continuing: completed → re-evaluate their output against the new spec; running and affected → abandon/respawn; not yet started → re-brief. NEVER merge results produced under a superseded spec into the final deliverable.
+
 ## Work state
 - TaskCreate your work item(s) at start; TaskUpdate at milestones; set owner to your name from the brief. The shared task list is the live dashboard your spawner watches. (ToolSearch "select:TaskCreate,TaskUpdate" first if not loaded; if your harness lacks Task tools entirely, say so in your report and rely on state snapshots.)
 - Files > context: durable bulk findings (inventories, research, decisions) go into files under the workspace, referenced by path in reports.

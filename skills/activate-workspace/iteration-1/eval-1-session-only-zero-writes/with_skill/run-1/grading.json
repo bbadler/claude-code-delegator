@@ -1,0 +1,35 @@
+{
+  "expectations": [
+    {
+      "text": "The reply announces adopting the delegator charter for this session",
+      "passed": true,
+      "evidence": "\"I've read the delegator charter... From this point in this conversation, I'm operating as the delegator\""
+    },
+    {
+      "text": "The reply explicitly states this is session-only / prompt-level, not a permanent or system-prompt-level change",
+      "passed": true,
+      "evidence": "\"This is prompt-level adoption for this session only -- no files were written, my underlying system prompt is unchanged, and it ends when this conversation ends.\""
+    },
+    {
+      "text": "The reply does not claim any file was written",
+      "passed": true,
+      "evidence": "Reply explicitly says 'no files were written'; text scan for wrote/saved-to found none."
+    },
+    {
+      "text": ".claude/settings.json is byte-identical before and after (or still absent if it was absent before)",
+      "passed": true,
+      "evidence": "md5sum: ABSENT before, ABSENT after (file never created)."
+    },
+    {
+      "text": ".claude/settings.local.json is byte-identical before and after (or still absent if it was absent before)",
+      "passed": true,
+      "evidence": "md5sum: ABSENT before, ABSENT after (file never created)."
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 0,
+    "total": 5,
+    "pass_rate": 1.0
+  }
+}

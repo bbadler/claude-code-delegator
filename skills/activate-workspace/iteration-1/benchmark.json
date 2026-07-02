@@ -1,0 +1,273 @@
+{
+  "metadata": {
+    "skill_name": "activate",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-07-02T18:08:20Z",
+    "evals_run": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 17.4,
+        "tokens": 18150,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The reply announces adopting the delegator charter for this session",
+          "passed": true,
+          "evidence": "\"I've read the delegator charter... From this point in this conversation, I'm operating as the delegator\""
+        },
+        {
+          "text": "The reply explicitly states this is session-only / prompt-level, not a permanent or system-prompt-level change",
+          "passed": true,
+          "evidence": "\"This is prompt-level adoption for this session only -- no files were written, my underlying system prompt is unchanged, and it ends when this conversation ends.\""
+        },
+        {
+          "text": "The reply does not claim any file was written",
+          "passed": true,
+          "evidence": "Reply explicitly says 'no files were written'; text scan for wrote/saved-to found none."
+        },
+        {
+          "text": ".claude/settings.json is byte-identical before and after (or still absent if it was absent before)",
+          "passed": true,
+          "evidence": "md5sum: ABSENT before, ABSENT after (file never created)."
+        },
+        {
+          "text": ".claude/settings.local.json is byte-identical before and after (or still absent if it was absent before)",
+          "passed": true,
+          "evidence": "md5sum: ABSENT before, ABSENT after (file never created)."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 5,
+        "failed": 0,
+        "total": 5,
+        "time_seconds": 22.0,
+        "tokens": 26134,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": ".claude/settings.local.json now contains an \"agent\" key with a value matching one of the session's own available agent types",
+          "passed": true,
+          "evidence": "Post-run file: {\"agent\": \"delegation-kit:delegator\", ...} -- matches the namespaced type confirmed present via --plugin-dir."
+        },
+        {
+          "text": "Any keys that existed in .claude/settings.local.json before this run still exist afterward, unmodified",
+          "passed": true,
+          "evidence": "permissions={'allow':['Bash','Read']} and some_other_setting='must_survive' both present, byte-identical, after the run (verified programmatically)."
+        },
+        {
+          "text": ".claude/settings.json (the non-local, git-tracked file) was NOT modified",
+          "passed": true,
+          "evidence": "md5sum ABSENT before and after."
+        },
+        {
+          "text": "The reply quotes or reflects the read-back verification (the agent value and/or the preserved-keys list), not just an unverified claim of success",
+          "passed": true,
+          "evidence": "Reply: 'Other keys (permissions, some_other_setting) were preserved untouched.'"
+        },
+        {
+          "text": "The reply states that new sessions in this workspace will now start as the delegator automatically",
+          "passed": true,
+          "evidence": "Reply: 'every new or resumed session in this workspace will start as the delegator.'"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 17.2,
+        "tokens": 16303,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The \"agent\" key is absent from .claude/settings.local.json after this run",
+          "passed": true,
+          "evidence": "Post-run file has no 'agent' key (verified programmatically)."
+        },
+        {
+          "text": "The pre-existing unrelated key in .claude/settings.local.json is still present and unchanged after this run",
+          "passed": true,
+          "evidence": "permissions and some_other_setting both present and byte-identical to their eval-2 end-state."
+        },
+        {
+          "text": "The reply reports having removed the switch (not just claims it without evidence)",
+          "passed": true,
+          "evidence": "Reply quotes the script's own output verbatim: 'VERIFIED: .claude/settings.local.json has no \"agent\" key (removed, or never set) / OTHER KEYS PRESERVED: [\\'permissions\\', \\'some_other_setting\\']'"
+        },
+        {
+          "text": "The reply notes that a currently-running delegator session is unaffected until it is closed or restarted",
+          "passed": true,
+          "evidence": "Reply: 'any delegator session currently running elsewhere stays a delegator until it's closed or restarted.'"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 4,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 21.9,
+        "tokens": 18365,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The reply clearly states it could not proceed because the existing settings file is invalid/corrupt",
+          "passed": true,
+          "evidence": "Reply quotes: 'REFUSED: .claude/settings.local.json is not valid JSON (Expecting value: line 1 column 1 (char 0)) -- refusing to touch it, nothing written.'"
+        },
+        {
+          "text": "The reply does not claim the persistent switch was successfully armed",
+          "passed": true,
+          "evidence": "Reply: 'The persistent activation was not applied.'"
+        },
+        {
+          "text": ".claude/settings.local.json's raw byte content is unchanged from the deliberately-corrupted seed (still invalid JSON, same content)",
+          "passed": true,
+          "evidence": "md5sum identical before and after (c24557587f30695f8fa6f96c8a885309 both runs)."
+        },
+        {
+          "text": "The reply does not claim a system-prompt-level or otherwise permanent conversion happened",
+          "passed": true,
+          "evidence": "Reply goes further than required: 'I have not adopted the delegator charter for this session either, since the persistent step didn't complete.'"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.6,
+        "passed": 3,
+        "failed": 2,
+        "total": 5,
+        "time_seconds": 7.7,
+        "tokens": 9419,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The reply announces adopting the delegator charter for this session",
+          "passed": false,
+          "evidence": "\"I don't have a built-in 'delegator mode' -- it's not one of my configured skills or settings.\" No charter exists to adopt without the skill/plugin."
+        },
+        {
+          "text": "The reply explicitly states this is session-only / prompt-level, not a permanent or system-prompt-level change",
+          "passed": false,
+          "evidence": "No concept of session-only vs persistent modes exists in the baseline reply -- it doesn't know the architecture at all."
+        },
+        {
+          "text": "The reply does not claim any file was written",
+          "passed": true,
+          "evidence": "Baseline correctly wrote nothing (it also did nothing useful), but only by accident of not knowing what to do."
+        },
+        {
+          "text": ".claude/settings.json is byte-identical before and after (or still absent if it was absent before)",
+          "passed": true,
+          "evidence": "No file activity occurred (irrelevant to this baseline)."
+        },
+        {
+          "text": ".claude/settings.local.json is byte-identical before and after (or still absent if it was absent before)",
+          "passed": true,
+          "evidence": "No file activity occurred (irrelevant to this baseline)."
+        }
+      ],
+      "notes": [
+        "Baseline correctly demonstrates the skill's necessity: without it, 'activate delegator mode' is meaningless to the model -- it offers unrelated generic interpretations (delegating to subagents, a Workflow tool, a saved memory preference) rather than anything resembling the actual architecture."
+      ]
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 19.625,
+        "stddev": 2.6862,
+        "min": 17.2,
+        "max": 22.0
+      },
+      "tokens": {
+        "mean": 19738.0,
+        "stddev": 4363.2906,
+        "min": 16303,
+        "max": 26134
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.6,
+        "stddev": 0.0,
+        "min": 0.6,
+        "max": 0.6
+      },
+      "time_seconds": {
+        "mean": 7.7,
+        "stddev": 0.0,
+        "min": 7.7,
+        "max": 7.7
+      },
+      "tokens": {
+        "mean": 9419.0,
+        "stddev": 0.0,
+        "min": 9419,
+        "max": 9419
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.40",
+      "time_seconds": "+11.9",
+      "tokens": "+10319"
+    }
+  },
+  "notes": []
+}

@@ -1,0 +1,35 @@
+{
+  "expectations": [
+    {
+      "text": "The reply explicitly states it will not write any file / cannot make a permanent change itself",
+      "passed": true,
+      "evidence": "\"this skill deliberately never writes that for you -- instead, here are the two real ways to do it\""
+    },
+    {
+      "text": "The reply mentions .claude/settings.local.json as the manual, personal, gitignored option the user could edit themselves",
+      "passed": true,
+      "evidence": "\"Add it to .claude/settings.local.json yourself (personal, gitignored -- won't affect teammates): { \\\"agent\\\": \\\"delegation-kit:delegator\\\" }\""
+    },
+    {
+      "text": "The reply mentions launching with `claude --agent delegator` as the other manual alternative",
+      "passed": true,
+      "evidence": "\"Or launch a fresh terminal session with claude --agent delegator whenever you want it.\""
+    },
+    {
+      "text": ".claude/settings.json is byte-identical before and after (or still absent if it was absent before)",
+      "passed": true,
+      "evidence": "md5sum: ABSENT before, ABSENT after."
+    },
+    {
+      "text": ".claude/settings.local.json is byte-identical before and after (or still absent if it was absent before)",
+      "passed": true,
+      "evidence": "md5sum: ABSENT before, ABSENT after."
+    }
+  ],
+  "summary": {
+    "passed": 5,
+    "failed": 0,
+    "total": 5,
+    "pass_rate": 1.0
+  }
+}

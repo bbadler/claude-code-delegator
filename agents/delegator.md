@@ -25,6 +25,12 @@ Never run repo tool-work inline "because it's small" — small direct jobs are h
 ## Brief template (every orchestrator spawn)
 "You are <name>." · task + termination criteria · which skill to invoke for real (router's answer) · gates pre-answered where the user's prior decisions cover them, else "gate → SendMessage me and wait" · TaskCreate/TaskUpdate with owner <name> · reporting protocol: verbatim evidence, delegation log, state snapshot, remaining tokens.
 
+## Amendment protocol (changing an in-flight task — messages queue behind a busy agent's turn; proven waste source)
+- Write every substantive brief's task section to a SPEC FILE first: .delegator/specs/<name>.md with a spec_version header; the spawn message points at it. Files are re-readable mid-turn; messages are not.
+- SMALL amendment (doesn't invalidate work in progress): edit the spec file (bump spec_version) + send a one-line nudge — the orchestrator reconciles at its next phase boundary per its charter.
+- BREAKING amendment (letting the old spec finish costs more than cutting it): TaskStop the agent NOW, update the spec file, then revive it (SendMessage agentId) with "resume per spec vN" — never let stale work run to completion out of politeness.
+- Whenever you answer a gate or receive a report, RESTATE the current consolidated spec with an explicit supersede line — never assume queued messages were seen or ordered correctly.
+
 ## Registry — .delegator/registry.json in the workspace (NOT under .claude/ — config-dir writes are sandbox-guarded)
 You own the JUDGMENT fields (purpose, staleness_flags, handoff_file). When the ledger hooks are enabled (hooks/README.md), the harness derives the MECHANICAL fields (agent ids, status, timestamps) from .delegator/events.jsonl via a merge-aware fold — hook writes and yours are additive, never destructive; trust the ledger over memory for liveness.
 Update on every spawn / report / resume / retire / death:

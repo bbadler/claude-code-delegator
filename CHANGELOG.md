@@ -2,6 +2,73 @@
 
 All notable changes to `claude-code-delegator` are documented here.
 
+## v1.1.0 (2026-07-03)
+
+### `/delegation-kit:activate` — in-session activation skill
+
+- **`skills/activate/SKILL.md`** — the zero-terminal alternative to relaunching
+  `claude --agent delegator` from a shell. Registers as `/delegation-kit:activate`
+  when the plugin is installed, or `/delegator-activate` via classic `install.sh`.
+  Session-only by design: "activate delegator" / "delegator mode" reads the
+  delegator charter and soft-adopts it for the rest of the current conversation only
+  — this skill **never writes any file, under any phrasing**, including
+  "permanently" / "for this workspace" requests, which get a spoken pointer to the
+  two manual alternatives (hand-edit `.claude/settings.local.json` yourself, or
+  launch `claude --agent delegator` from a terminal) rather than an automatic write.
+  A matching **deactivate** path ("deactivate delegator" / "delegator off") just
+  announces dropping the charter — there is nothing on disk to ever undo.
+  Agent-name detection prefers a bare `delegator` type (classic install) over the
+  namespaced `delegation-kit:delegator` (plugin install); refuses and instructs
+  installation if neither is present. Refuses outside a recognizable workspace root
+  (this skill still reads a charter file relative to an assumed project, so it won't
+  act from `$HOME` or `/`).
+- **Operator-rejected design path, kept in the record rather than erased**: an
+  earlier draft supported an explicit-opt-in "persistent" mode that wrote a
+  merge-preserving `agent` key to `.claude/settings.local.json` (never plain
+  `.claude/settings.json`, specifically to avoid silently forcing delegator-mode
+  onto teammates via a git-committed file — that blast-radius finding was real and
+  independently corroborated from two directions) behind a mandatory consent
+  disclosure. The operator's final call cut this entirely: the skill must never
+  write a settings file at all, full stop. The persistent-mode script
+  (`scripts/manage_settings.py`) and its eval scenarios were removed accordingly;
+  the blast-radius reasoning itself is preserved here since it's still the reason
+  this skill's spoken-only manual instructions point at `.claude/settings.local.json`
+  and not plain `settings.json`.
+- Built via a real `skill-creator:skill-creator` create-eval loop, not hand-authored,
+  across two iterations (the persistent-mode build, then the operator's cut).
+  Current eval set: 3 scenarios (soft-adopt with zero file writes, deactivate
+  announces only, a "make it permanent" request declines and points to the manual
+  alternatives) — 14/14 assertions pass live against a `--plugin-dir`-loaded copy of
+  this repo, no Bash-tool permission workaround needed this time since the skill no
+  longer shells out to anything.
+- `install.sh` also installs this skill for classic users
+  (`~/.claude/skills/delegator-activate/`), with matching `--verify` (checks the
+  skill directory exists) and `--uninstall` (backs up / restores it) coverage.
+
+### `hooks/ledger.py` — registry dict/list shape fix
+
+- `fold_registry()`'s merge-onto-existing-registry step assumed the pre-existing
+  `.delegator/registry.json` was always dict-shaped (`{"agents": {...}}`) — but
+  `agents/delegator.md`'s hand-written format doesn't pin a container shape, and one
+  plausible shape (`{"version":1,"orchestrators":[...]}`) turned out to silently
+  **clobber** the entire hand-written registry on the very next hook-observed event:
+  `existing.get("agents", {})` on a dict with no `"agents"` key returns the empty-dict
+  *default*, not an error, so the old fail-open contract never caught it. This closes
+  the gap the v1.0.0 entry below already flagged as a known limitation — confirmed
+  live before fixing it, not a new regression.
+- Fixed with `_normalize_existing()`: detects the on-disk shape (the delegator's
+  hand-written list, a bare top-level list, or this script's own dict), merges
+  ledger-derived mechanical fields onto matching entries by `agent_id`, and always
+  writes back in whichever shape was already there — never silently converts one to
+  the other. Entries with no `agent_id`, or malformed non-dict items, round-trip
+  untouched. Fault-injected (different-agent event, same-agent event, concurrent
+  double-append, corrupt pre-existing file) and cold-verified independently, including
+  a 6-iteration concurrency stress pass with zero lost updates.
+
+### `.claude-plugin/plugin.json`
+
+- Version bumped to 1.1.0.
+
 ## v1.0.0 (2026-07-02)
 
 First tagged release. Everything below shipped and was probe-proven or test-proven on

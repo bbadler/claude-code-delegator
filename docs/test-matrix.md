@@ -103,13 +103,32 @@ grading-logic drift between the two runner implementations.
   agree on the registry's container shape (dict keyed by `agent_id`); the delegator's
   own hand-written format is a list. `testbed/run_all.py`'s `registry_has_orchestrator()`
   handles both shapes explicitly (a bug where it didn't, found by fault-injection, is
-  fixed); the underlying hook fold in `hooks/ledger.py` has not been independently
-  confirmed to handle a pre-existing list-shaped registry the same way — untested by
-  this suite. A1 tests that the registry exists and names an orchestrator, not the
-  writer-ownership or shape-merge semantics.
+  fixed); the underlying hook fold in `hooks/ledger.py` initially had the same class of
+  bug — live-confirmed to CLOBBER a pre-existing list-shaped registry (every hand-written
+  judgment field destroyed by one event) — and was fixed pre-v1.1.0 with `_normalize_existing()`
+  (shape-preserving dual-format merge), fault-injected and independently cold-verified
+  (list-shape survival, judgment-field byte-identity, bare-list round-trip, concurrency).
+  Still true: this SUITE does not exercise that path — the evidence lives in the fix
+  task's fault-injection, not in `run_all.py`. A1 tests that the registry exists and
+  names an orchestrator, not the writer-ownership or shape-merge semantics.
 - **Zero-pollution (design rule 1) has no direct assertion.** Nothing inspects the
   delegator's own transcript to confirm it stayed zero-tool; every test only observes
   downstream artifacts.
+- **`--plugin-dir <path>` alone does not grant file-read access to that path in headless
+  `claude -p` mode** — confirmed live while building `skills/activate/SKILL.md`: a
+  session loaded via `--plugin-dir /abs/path/to/this/repo` correctly saw the plugin's
+  namespaced agent types and skill, but a subsequent `Read`/`Bash cat` of a file inside
+  that same directory (the skill instructing it to read `../../agents/delegator.md`)
+  was blocked — "sandboxed to only access files under `<workspace>`" — and the model
+  correctly refused to fabricate the file's contents rather than bluff. Adding
+  `--add-dir <same-path>` alongside `--plugin-dir` fixed it. This is believed specific
+  to pointing `--plugin-dir` at an arbitrary external dev directory (not proven against
+  a real marketplace-cache install, which lives inside `~/.claude/plugins/cache/...` —
+  the same trusted namespace `install.sh --verify`'s headless calls already read from
+  without any extra flag) — anyone dev-testing a plugin's own bundled files (charter
+  docs, scripts, references) headless via `--plugin-dir` should expect to need
+  `--add-dir` too, and should not assume a clean `--plugin-dir`-only repro is safe to
+  skip.
 - **The router's actual decision is never independently checked.** Every test phrases
   tasks so the *correct* route is unambiguous (e.g. "produce a census" for the `census`
   skill), so a silently-wrong router response could still produce a passing test if the

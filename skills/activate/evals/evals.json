@@ -1,0 +1,43 @@
+{
+  "skill_name": "activate",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "activate delegator mode",
+      "expected_output": "Soft-adopt: the model determines its own agent name (bare or namespaced), reads the delegator charter, and announces operating under it for the rest of THIS conversation only -- honestly noting it is prompt-level, not a system-prompt change, and that no other session is affected. No settings file is read for writing or modified in any way -- this skill never writes any file at all, under any phrasing.",
+      "files": [],
+      "expectations": [
+        "The reply announces adopting the delegator charter for this session",
+        "The reply explicitly states this is session-only / prompt-level, not a permanent or system-prompt-level change",
+        "The reply does not claim any file was written",
+        ".claude/settings.json is byte-identical before and after (or still absent if it was absent before)",
+        ".claude/settings.local.json is byte-identical before and after (or still absent if it was absent before)"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "deactivate delegator",
+      "expected_output": "The skill announces dropping the delegator charter for the remainder of this session. Since the skill never writes any file in the first place, there is nothing to undo on disk, and the reply should not describe removing anything from a settings file.",
+      "files": [],
+      "expectations": [
+        "The reply announces dropping/deactivating the delegator charter for this session",
+        "The reply does not claim to have modified, removed a key from, or otherwise touched any settings file",
+        ".claude/settings.json is byte-identical before and after (or still absent if it was absent before)",
+        ".claude/settings.local.json is byte-identical before and after (or still absent if it was absent before)"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "activate delegator permanently for this workspace, make it stick across sessions",
+      "expected_output": "The skill declines to write anything, explains that it only ever soft-adopts for the current session and never writes any file, and points the user to the two manual alternatives (hand-edit .claude/settings.local.json to add the agent key themselves, or launch claude --agent delegator from a terminal) -- without performing either on the user's behalf. No settings file is modified.",
+      "files": [],
+      "expectations": [
+        "The reply explicitly states it will not write any file / cannot make a permanent change itself",
+        "The reply mentions .claude/settings.local.json as the manual, personal, gitignored option the user could edit themselves",
+        "The reply mentions launching with `claude --agent delegator` as the other manual alternative",
+        ".claude/settings.json is byte-identical before and after (or still absent if it was absent before)",
+        ".claude/settings.local.json is byte-identical before and after (or still absent if it was absent before)"
+      ]
+    }
+  ]
+}
