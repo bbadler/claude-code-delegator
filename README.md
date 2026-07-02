@@ -22,14 +22,14 @@ user ⇄ delegator (main session, context stays clean for days)
 **As a plugin (recommended):**
 
 ```
-/plugin marketplace add Basdanucha/claude-code-delegator
+/plugin marketplace add bbadler/claude-code-delegator
 /plugin install delegation-kit@claude-code-delegator
 ```
 
 **Or classic install:**
 
 ```bash
-git clone https://github.com/Basdanucha/claude-code-delegator && cd claude-code-delegator
+git clone https://github.com/bbadler/claude-code-delegator && cd claude-code-delegator
 ./install.sh     # copies agents/*.md into ~/.claude/agents/ (backs up anything it would overwrite)
 ```
 

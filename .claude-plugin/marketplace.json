@@ -1,7 +1,7 @@
 {
   "name": "claude-code-delegator",
   "description": "Long-running delegation architecture for Claude Code — delegator main session + full-power orchestrator subagents, probe-proven.",
-  "owner": { "name": "Basdanucha" },
+  "owner": { "name": "bbadler" },
   "plugins": [
     {
       "name": "delegation-kit",
