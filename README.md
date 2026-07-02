@@ -94,4 +94,4 @@ Optional, per workspace: declare a router in the workspace `CLAUDE.md` — `Rout
 
 ## Status & roadmap
 
-Probe ledger P-A..P-K plus the full stress suite are green (`docs/`). Improvement roadmap: `docs/roadmap-v2.md`. License: MIT.
+Probe ledger P-A..P-K plus the full stress suite are green (`docs/`). Improvement roadmap (multi-lens ideation + adversarial judging, 18 surviving proposals): `docs/roadmap-v2.md`. License: MIT.
