@@ -2,6 +2,30 @@
 
 All notable changes to `claude-code-delegator` are documented here.
 
+## v1.4.1 (2026-07-03)
+
+Bug-fix follow-up to v1.4.0 — all found by investigating the first real full-suite
+run and closing the three issues it surfaced (#2, #3). Gate mechanism unchanged;
+these fix the read-side race, a test grader, and document a resting-subagent rule.
+
+- **First premature Stop now blocks (closes #3 Gap 1 + #2).** `campaign_has_outstanding_work()`
+  read only the ledger-derived `registry.json`, which LAGS at a spawn boundary — the
+  first `Stop` could fire before the just-spawned worker's `SubagentStart` had folded
+  into `status`, so the gate saw "nothing active" and allowed a premature stop. It now
+  also honors the delegator's `owes:true`/per-agent `rest_ok` judgment fields, which are
+  written SYNCHRONOUSLY at spawn (beating the async fold) — closing the race and the
+  long-standing owes-contract divergence in one change. Verified by 5 synthetic cases,
+  zero live sessions.
+- **Multi-cycle A10 grader (test-harness only).** The shipped `test_a10` grader tracked
+  only the worker's FIRST `SubagentStart..SubagentStop` cycle, false-failing a legitimate
+  run whose correct Stop-block landed in a SECOND cycle (after the worker rested once and
+  was nudged). Replaced with all-cycles tracking; A10 passes on two independent runs.
+- **Resting-subagent answer rule (closes #3 Gap 2).** Probe-confirmed: `SendMessage(agentId)`
+  revives a rested subagent ("resumed it in the background with your message"), but a
+  mailbox/name send to a fully-rested recipient "queues for the next tool round" — which a
+  rested agent never takes — and hangs (the A7-t5 root cause). The delegator charter now
+  mandates answering resting agents via `agentId` revival, never a name/mailbox send.
+
 ## v1.4.0 (2026-07-03)
 
 ### Verified state (honest — release-gate spot-check by the delegator)
