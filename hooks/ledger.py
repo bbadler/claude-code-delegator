@@ -515,10 +515,21 @@ def campaign_has_outstanding_work(campaign_dir):
         return False, None
     _, entries_by_agent_id, _, _ = normalized
 
+    # An agent counts as outstanding when EITHER signal says so:
+    #   - ledger-derived status still active (the async fold's view), OR
+    #   - the delegator's own owes:true judgment field (written SYNCHRONOUSLY at
+    #     spawn, per agents/delegator.md's OWES CONTRACT — this closes the
+    #     spawn-boundary race where the first Stop fires before SubagentStart
+    #     has folded into status, issue #3 Gap 1 / issue #2).
+    # Per-agent rest_ok:true exempts that one agent (a delegator-sanctioned
+    # legitimate rest), without touching the top-level rest_ok escape above.
     active_names = [
         (e.get("name") or aid)
         for aid, e in entries_by_agent_id.items()
-        if isinstance(e, dict) and e.get("status") not in ("stopped", "retired", "died")
+        if isinstance(e, dict)
+        and not e.get("rest_ok")
+        and (e.get("status") not in ("stopped", "retired", "died")
+             or e.get("owes") is True)
     ]
     reasons = []
     if active_names:
