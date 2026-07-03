@@ -2,6 +2,15 @@
 
 All notable changes to `claude-code-delegator` are documented here.
 
+## v1.2.4 (2026-07-03)
+
+- **Skill gates: the delegator answers them ITSELF (operator clarification of
+  v1.2.3)**: relayed skill gates (menus / HALT / elicitation) are the delegator's
+  to decide in EVERY mode — that is what user-proxy means; forwarding a skill's
+  menu to the human is NOT the default even in interactive mode. The human sees a
+  skill gate only when it genuinely needs their intent (scope, money, publish
+  targets, identity — the fork-escalation bar).
+
 ## v1.2.3 (2026-07-03)
 
 - **Skill gates are not forks (operator clarification)**: any decision point a
