@@ -2,6 +2,21 @@
 
 All notable changes to `claude-code-delegator` are documented here.
 
+## v1.2.2 (2026-07-03)
+
+- **Autonomy correction (operator-caught)**: v1.2.1's orchestrator bullet told
+  agents to self-resolve forks in autonomous runs — contradicting the delegator
+  charter ("answer every child gate, never leave a child hanging") and pushing
+  decisions down to the least-context level. Corrected: autonomous mode changes
+  the orchestrator's gate discipline NOT AT ALL (its spawner is a machine, always
+  present, holds campaign context, can commission research); the mode matters only
+  at the human boundary, where the delegator answers or returns "DEFERRED — skip
+  that step, complete the rest". "The human boundary is your spawner's problem,
+  never yours."
+- README caught up to v1.2.x: plugin quick-start now leads with auto-wired hooks +
+  guard, per-session storage paths in the diagram and problems table, new
+  autonomy/mode-intake row, 18+ probes badge.
+
 ## v1.2.1 (2026-07-03)
 
 Charter-only release — the autonomy DNA wave (operator-driven, four rounds):
