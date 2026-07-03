@@ -79,6 +79,8 @@ cd <your-workspace>
 claude --agent delegator          # the whole session becomes a delegator
 ```
 
+First thing it does on a real task: asks you **interactive or autonomous** (once, sticky for the campaign) — autonomous runs resolve every fork at the delegator level with audited *Judgment calls* and never hang on a question.
+
 **No terminal? (desktop app / VS Code):** just say `activate delegator` in any chat — the bundled `delegator-mode` skill adopts the delegator charter for **that session only** (prompt-level, zero config changes; `deactivate delegator` switches it off). It never writes any file, even if you ask to make it permanent — a workspace-wide switch exists but is manual-only (see the FAQ).
 
 Or spawn a single orchestrator from any normal session:
@@ -98,7 +100,7 @@ Optional, per workspace: declare a router in the workspace `CLAUDE.md` — `Rout
 | **The ack-then-wait stall** — an agent spawns a background child, rests, and never wakes | ships the two probe-proven wait patterns: **collect-in-turn** (sentinel-grep the child's output file) and **rest-with-ping** (the child explicitly messages its named parent — that *does* wake it) |
 | **Lost campaigns on crash or restart** | agents revive from their on-disk transcripts via `SendMessage(agentId)` — proven across a real process kill — plus continuous state snapshots as the fallback seed |
 | **Registries that agents "forget" to write** | harness **hooks** (auto-wired by the plugin) append every spawn/stop to a per-session ledger under `~/.claude/projects/<project>/delegator/` and fold a registry from it — deterministic, no model discipline required, your repo never touched, concurrent sessions can't mix ([`hooks/`](hooks/README.md)) |
-| **Unattended runs that stall on a question — or bulldoze through with lazy shortcuts** | **mode intake** at campaign start (interactive vs autonomous, asked once via AskUserQuestion); autonomous = the delegator answers every gate itself and logs audited **Judgment calls**; forks go through a self-answer → web-research → quality-bar ladder — lazy resolutions (stubs, error-swallowing, silent scope cuts) are named and forbidden |
+| **Unattended runs that stall on a question — or bulldoze through with lazy shortcuts** | **mode intake** at campaign start (interactive vs autonomous, asked once via AskUserQuestion); forks always flow UP through a self-answer → web-research ladder to the delegator, which holds campaign context and answers with audited **Judgment calls** in autonomous mode — the quality bar forbids lazy resolutions (stubs, error-swallowing, silent scope cuts), and only genuine human-territory items come back "DEFERRED — skip, complete the rest" |
 | **Reports you can't trust** | the delegator ships a **skeptical-operator doctrine**: reports are claims; load-bearing facts get spot-checked by cold agents; irreversible actions require independent verification |
 | **Mid-flight spec changes that get ignored** — you message a busy agent a correction; it finishes the *old* plan first (messages queue until its turn ends) | **amendment protocol**: briefs live in spec *files* (`.delegator/specs/` + `spec_version`) — re-readable mid-turn, unlike messages; breaking changes = stop-then-amend; the rule cascades to workers (abandon-and-respawn + triage, never merge stale-spec results) |
 
@@ -114,7 +116,13 @@ Every mechanical claim below was verified by a live probe on a real install (Cla
 - **A teammate's unnamed children launch ASYNC**, not blocking → **collect-in-turn**: launch all independent children, keep working, poll each child's `output_file` with a narrow sentinel grep (`timeout N bash -c 'until grep -q SENTINEL file; do sleep 2; done'` works).
 - **Bare completions never wake a resting parent** (they bubble to the top session only) — but an **explicit child→parent `SendMessage` does** (rest-with-ping), with the orphan risk covered by the delegator's watchdog nudge.
 - **Deep gates work**: a depth-2 agent's `SendMessage(to:"main")` reaches the top session, and the reply to its `agentId` revives it to finish.
-- **Agents survive process exits**: `SendMessage(agentId)` revives a rested or orphaned agent from its on-disk transcript — even after the spawning process died and the session resumed under a new session id — with full context retained.
+- **Agents survive process exits**: `SendMessage(agentId)` revives a rested or orphaned agent from its on-disk transcript — even after the spawning process died — with full context retained.
+- **Plain `--resume` KEEPS the session id** — only `--fork-session` mints a new one (probed twice independently; corrects an earlier crash-path observation). `--session-id <uuid>` pins a known id for deterministic tests, and `$CLAUDE_CODE_SESSION_ID` tells a session its own id.
+- **Hook events carry the TOP session's id at every nesting depth** (depth-2 grandchild = same id, 3× reproduced) — one registration covers a whole campaign tree.
+- **`AskUserQuestion` is hard-blocked inside subagents** — instant harness rejection directing the agent back to its orchestrator; no hang, no dialog, no auto-answer. The defs treat that error as a relay-gate.
+- **A plugin's `hooks/hooks.json` auto-registers purely by location** (`${CLAUDE_PLUGIN_ROOT}` paths; proven with a delete-the-file negative control), matching the pattern of official Anthropic plugins.
+- **Completed tasks are PRUNED from the shared task board within hours** (`TaskGet` → not-found) — the board is a live-work channel, not an archive; durable spec history belongs in reports/files.
+- **The settings `agent` key works at project and local scope, not user scope** — and converts resumed sessions too (the blast radius behind the session-only design of `delegator-mode`).
 - **fork → fork ✗**; named → self-fork ✓; main (model-initiated) → fork ✓ with fresh budget and full context inheritance.
 - **Named agents don't know their own name** — every brief opens with "You are <name>".
 - **Hook events fire for real**: `SubagentStart`/`SubagentStop`/`PostToolUse` were captured live with exact payloads, plus the `agent-<id>.meta.json` sidecar (name, type, spawn depth) — the ledger is built only on observed fields.
@@ -186,7 +194,7 @@ Yes — manual-only, deliberately: add `{ "agent": "delegator" }` to the workspa
 
 ## 🏗️ How this was built
 
-Probe-first, adversarially: every harness behavior was measured on a live install before any rule was written on it; a multi-lens ideation pass with adversarial judging produced the [roadmap](docs/roadmap-v2.md); and the human operator overruled the AI designer **seven times in two days** — fork-first micro-jobs, agent revival across restarts, async children, depth budgets, deep gates, per-report handoff files cut as token waste, and the mid-flight amendment protocol — each overrule settled by a probe, not an argument, and shipped. The skeptical-operator doctrine in `delegator.md` is that behavior, codified.
+Probe-first, adversarially: every harness behavior was measured on a live install before any rule was written on it; a multi-lens ideation pass with adversarial judging produced the [roadmap](docs/roadmap-v2.md); and the human operator overruled the AI designer **a dozen times in two days** — fork-first micro-jobs, agent revival across restarts, async children, depth budgets, deep gates, per-report handoff files cut as token waste, the mid-flight amendment protocol, session-only activation (twice), the native-first task board over invented spec files, and autonomy that never lowers the gate threshold — each overrule settled by a probe, not an argument, and shipped. The skeptical-operator doctrine in `delegator.md` is that behavior, codified.
 
 ## 🤝 Prior art
 
