@@ -12,12 +12,21 @@ empty allow on a settled one (plus 4 real `Stop hook feedback` blocks in the `ca
 hand-probe). `idle_gate.py` A9 e2e: clean PASS via real team formation. Unit
 fault-injections: 9/9.
 
-**Known issues shipped as documented, not hidden** (per operator "works-is-enough" trim
-— full-suite regression, cold-verify, and repeated e2e were cut):
-- `test_a10()` automated regression does NOT pass (7/7 attempts failed: rate-limits,
-  timeouts, and a "nonce not found" bookkeeping bug). The gate mechanism is proven by
-  the synthetic + calib2 evidence above; the automated e2e wrapper has a findable bug —
-  fix before trusting A10 as a green CI gate.
+**Update, same tag**: the items below were the honest known-issues list at the point
+of the operator "works-is-enough" trim (full-suite regression, cold-verify, and
+repeated e2e were cut at that time). A follow-up pass has since completed that
+work — see "A9/A10 — live end-to-end evidence" below for the full accounting,
+including the real bug `test_a10()` had (in its own grading code, not the gate)
+and its fix. Kept here, struck through in spirit but not in fact, for the honest
+record of what was and wasn't known at each point:
+- ~~`test_a10()` automated regression does NOT pass (7/7 attempts failed:
+  rate-limits, timeouts, and a "nonce not found" bookkeeping bug).~~ **Root-caused
+  and fixed**: the one clean, reproducible FAIL (once a fresh full default-set run
+  was actually done) was the test's OWN grading helper only tracking a worker
+  agent's FIRST `SubagentStart`→`SubagentStop` cycle, missing a later, genuinely
+  correct block that landed during a SECOND cycle (after the worker rested once
+  without delivering its result and got nudged back via `SendMessage`). Fixed;
+  `test_a10()` now PASSES, confirmed on two independent live runs. Full details below.
 - **Loop guard fixed post-report**: `stop_gate.py` ignored `stop_hook_active`, so a
   continuation chain could re-block instead of concluding once (a likely contributor to
   the A10 timeouts). Now allows when `stop_hook_active` is true; re-verified by synthetic
@@ -98,10 +107,12 @@ fault-injections: 9/9.
   corrupt registry→fail-open, no registry→fail-open, mixed active/stopped agents
   →names only the active one, no campaign at all→untouched) all pass directly
   against both gate scripts.
-- **A9/A10 — live end-to-end evidence, checked against artifacts already on disk
-  per an operator trim order (no new e2e attempts launched, no full regression
-  suite — see below). Reporting both honestly, including where A10 did NOT
-  cleanly pass**:
+- **A9/A10 — live end-to-end evidence.** The account below has two layers: the
+  original evidence (checked against artifacts already on disk per an operator
+  trim order — no new e2e attempts, no full regression suite) that shipped with
+  this tag, plus a follow-up pass that ran the full default-set suite fresh, hit
+  a real, fixable bug in A10's own test code, fixed it, and reconfirmed both
+  tests live. Both layers are kept for the honest record:
   - **A9 (idle-gate e2e, `testbed/run_all.py`'s real `test_a9()`) — PASS.**
     Direct evidence from a completed run (`/tmp/.../a9-drive.log`): a genuine
     Claude Code team formed, the named backgrounded teammate did real work
@@ -130,38 +141,74 @@ fault-injections: 9/9.
       a staleness timeout on `active` status, are the two options that come to
       mind). Evidence: `/tmp/delegator-a9-calib-dump.jsonl` (17 lines, full
       transcript).
-  - **A10 (stop-gate e2e, `testbed/run_all.py`'s real `test_a10()`) — FAIL across
-    all 7 recorded attempts** (the 7th finished on its own, found via a passive
-    check — not relaunched or waited on, per the trim order: no babysitting, no
-    launching an 8th). Honest accounting, not glossed over: attempt 1 hit a rate
-    limit then a 300s outer timeout; attempts 2-3 hit rate limits (no further
-    detail recorded); attempt 4 produced no log at all; attempt 5 FAILED on
-    `stop_gate.py` never being exercised at all on that run (registry already
-    showed nothing active by the time the top-level `Stop` fired — a
-    scenario-design edge case the test's own extensive docstring already
-    anticipated and explains); attempts 6-7 both FAILED on the SAME recurring
-    pattern — the nonce never appearing in the delegator's final result text /
-    "could not locate the child's own real background task bookkeeping in the
-    stream" — a repeated failure mode across the last two tries, not just
-    one-off flakiness, worth investigating specifically. **The underlying
-    MECHANISM is
-    separately, convincingly confirmed working** by an earlier, different,
-    hand-driven calibration probe (predating and informing `test_a10()`'s current
-    design, not a run of the actual test function) — `/tmp/a10-calib2-stream.jsonl`
-    shows repeated real `"Stop hook feedback:\nBusy-presence check:
-    still-active agent(s): <id>..."` blocks (`num_turns: 19` vs. a control run's
-    `2`) followed by the delegator's own final reply containing the correct
-    worker nonce. That's real evidence `stop_gate.py` itself works — but it is
-    NOT the same claim as "the automated `test_a10()` e2e test passes reliably,"
-    which as of this report it has not, in 6 real tries. This needs attention
-    (test-scenario timing/flakiness, or a genuine remaining gap) before A10 can
-    honestly be called a green permanent regression test.
-  - **Per operator trim order, explicitly NOT done and not claimed**: no full
-    default-set regression run against the gate-wired hooks (A0-A7 were not
-    re-verified with `stop_gate.py`/`idle_gate.py` live in the hook chain), no cold
-    verifier pass on this task, no additional e2e attempts beyond what's cited
-    above. `testbed/run_all.py`'s A8 calls are commented out (not deleted) with a
-    note explaining the pivot; its prompt templates/regexes are left in place.
+    - **Reconfirmed** on the fresh full default-set run described below — same
+      three conditions, clean pass, no regression.
+  - **A10 (stop-gate e2e, `testbed/run_all.py`'s real `test_a10()`) — PASS**,
+    after a full accounting of everything that came before and one real bug
+    found and fixed along the way. Original evidence at the time of the
+    operator trim, kept for the record: **FAIL across all 7 recorded attempts**
+    (rate limits, timeouts, one run where `stop_gate.py` was never exercised at
+    all by the time `Stop` fired, two runs where the nonce never appeared in the
+    delegator's final result text) — the underlying MECHANISM was separately,
+    convincingly confirmed working by a hand-driven calibration probe
+    (`/tmp/a10-calib2-stream.jsonl`, predating `test_a10()`'s current design):
+    repeated real `"Stop hook feedback:\nBusy-presence check: still-active
+    agent(s): <id>..."` blocks (`num_turns: 19` vs. a control run's `2`)
+    followed by the delegator's own final reply containing the correct worker
+    nonce — real evidence the gate itself works, but not the same claim as "the
+    automated e2e test passes reliably," which at that point it had not.
+    - **Follow-up: a fresh full default-set suite run (`./run_all.py`, no
+      `--full`) was actually done** — the thing the trim explicitly skipped.
+      `test_a10()`'s FIRST live attempt under this run FAILED with: "Stop-block
+      at stream idx 154 does not fall strictly within the worker agent's own
+      active window (SubagentStart idx 17 .. SubagentStop idx 108)." Full
+      forensic read of the raw `--include-hook-events` stream and the
+      session's own `events.jsonl` (real UTC timestamps) showed this was NOT
+      `stop_gate.py` misbehaving: the worker rested once at 14:22:26Z without
+      delivering its result (a real, separately-useful finding in its own
+      right — a sub-agent can end its turn passively awaiting an async
+      `Monitor` notification instead of polling, which counts as a premature
+      stop), the delegator noticed via its own busy-presence check and used
+      `SendMessage` to nudge it at 14:22:52Z, re-opening a SECOND
+      `SubagentStart`→`SubagentStop` window before the worker's true
+      completion at 14:23:13Z — and the real `{"decision":"block"}` (stream idx
+      154) had landed correctly inside THAT second window. The test's own
+      grading helper, `find_worker_active_bounds()`, only tracked the FIRST
+      Start→Stop pair (idx 17..108) and wrongly read the later, genuinely
+      correct block as landing "after" that too-narrow window — a bug in the
+      test's own code, not in the gate. Separately, that SAME run's FIRST Stop
+      attempt (right after the delegator's forced one-line status reply, while
+      the worker's first window was still open) was allowed through with an
+      empty hook response rather than blocked — noted here as an honest, not
+      fully root-caused, open observation (plausibly a hook-ordering nuance
+      specific to that instant), since it did not affect the run's outcome
+      (the SECOND, later attempt was correctly blocked, and stop_gate.py's own
+      unit fault-injection coverage separately confirms the block logic itself
+      is correct against a synthetic registry).
+    - **Fix**: replaced `find_worker_active_bounds()` with
+      `find_worker_active_windows()` (returns every `SubagentStart`/`SubagentStop`
+      cycle for the agent, not just the first) plus
+      `block_within_any_active_window()` (true if the block index falls inside
+      ANY of them). Confirmed two ways: (1) regrading the ORIGINAL failing run's
+      raw stream with the fix alone turns it into a clean PASS — windows
+      `[17..108]; [138..180]`, block at idx 154 falls inside the second; (2) an
+      independent fresh standalone re-run of `test_a10()` against the fixed code
+      PASSED cleanly on its own with an even richer 3-cycle scenario (windows
+      `[30..70]; [108..140]; [169..196]`, block at idx 59 inside the first) —
+      ruling out "the fix only happens to explain one lucky artifact."
+    - **Full default-set regression, now actually done**: A0, A1, A3, A4, A5, A6,
+      A7-t4, A9, A10 all PASS on the same fresh run. A2 and A7-t5 FAILED; both
+      were investigated and root-caused as pre-existing, gate-unrelated issues,
+      not regressions from GATES v2 — full accounting in `docs/test-matrix.md`'s
+      regression-status note (A2: zero `Stop hook feedback` turns in its own
+      transcript, a genuinely slow cold-verifier chain that outran the harness's
+      fixed 900s cap, same shape as a previously-documented flakiness class; A7-t5:
+      exactly one `Stop hook feedback` block, correctly fired while real work was
+      outstanding, with the actual failure being a separate SendMessage-to-a-
+      fully-rested-non-team-subagent delivery gap that `TeammateIdle`/
+      `idle_gate.py` do not cover at all, since that mechanism only applies to
+      NAMED team teammates). Unit fault-injection (9 cases, both gates) remains
+      green throughout.
 - **`hooks/hooks.json`/`hooks/delegator-hooks.json`**: `stop_gate.py` added as a new
   `Stop` entry; `idle_gate.py` added alongside the existing `ledger.py`/`watchdog.py`
   commands under `TeammateIdle`.

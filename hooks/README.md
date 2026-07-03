@@ -402,14 +402,13 @@ itself ever sets, as its own informed judgment call that a mechanical read is st
 above:**
 
 - **`stop_gate.py` — `Stop`.** Fires when the calling session's own turn tries to
-  end. Live-proven, but via a hand-driven calibration probe that predates and
-  informed `testbed/run_all.py`'s `test_a10` (not a passing run of `test_a10`
-  itself, which has not yet achieved a clean pass as of v1.4.0 — see
-  `docs/test-matrix.md` and the CHANGELOG for the honest accounting): raw
-  `--include-hook-events` telemetry showed a real ~90s backgrounded child's own
-  harness-tracked bookkeeping cross-referenced against genuine repeated blocks,
-  forcing the turn to continue rather than let the process exit — the reason
-  text is delivered as a synthetic **user** turn, `"Stop hook feedback:\n<reason>"`.
+  end. Live-proven with a clean, real PASS of `test_a10` itself (see
+  `docs/test-matrix.md`): raw `--include-hook-events` telemetry shows a genuine
+  `{"decision": "block", ...}` response landing strictly within the real
+  ~90s-backgrounded worker agent's own active window (`SubagentStart`..
+  `SubagentStop`), forcing the turn to continue rather than let the process
+  exit while the worker was still verifiably active — the reason text is
+  delivered as a synthetic **user** turn, `"Stop hook feedback:\n<reason>"`.
 - **`idle_gate.py` — `TeammateIdle`.** Fires when a named, backgrounded teammate
   inside a genuine Claude Code **team** is about to go idle. Live-proven with a
   clean, real PASS of `test_a9` itself (see `docs/test-matrix.md`) to
@@ -455,16 +454,19 @@ both are pure reads except for the block decision itself.
 Live e2e coverage (beyond the 9-case unit fault-injection of
 `campaign_has_outstanding_work()` and each script's delivery mechanics, which is a
 separate, already-covered layer): `testbed/run_all.py`'s `test_a9` (idle-gate) and
-`test_a10` (stop-gate), both wired into the default set. **As of v1.4.0, `test_a9`
-has a clean, real PASS; `test_a10` has FAILED all 6 recorded attempts (rate
-limits/timeouts, one genuine "gate never exercised" scenario-timing catch, two
-"nonce not found" misses) — the underlying mechanism is separately confirmed by
-a hand-driven probe, not by `test_a10` itself passing. See `docs/test-matrix.md`
-and the CHANGELOG for the full, honest accounting; this needs attention before
-`test_a10` can honestly be called a green permanent regression test.** `test_a10`
+`test_a10` (stop-gate), both wired into the default set and both PASS. `test_a10`
 is *designed* to rule out a specific ambiguity — that a passing run might just
 mean "the delegator's own charter discipline happened to behave well," never
 exercising the gate at all — by requiring the raw hook telemetry to show a real
-block decision landing strictly between the child's own start and completion
-bookkeeping, not merely that the run finished correctly; that design intent is
-sound even though the test hasn't yet reliably passed under it.
+`{"decision": "block"}` landing strictly within the worker agent's own
+`SubagentStart`..`SubagentStop` active window, not merely that the run finished
+correctly. Getting there took one real fix: the worker can rest once without
+delivering its result (ending its turn passively awaiting an async `Monitor`
+notification instead of polling) and get nudged back to life via `SendMessage`,
+opening a SECOND active window before its true completion — the test's own
+grading helper originally only tracked the first `SubagentStart`→`SubagentStop`
+pair, so a block landing correctly inside a LATER window was misread as "after
+the agent had already stopped." Fixed by tracking every Start/Stop cycle and
+checking membership in any of them, then reconfirmed on a fresh, independent
+live run (a 3-cycle scenario). See `docs/test-matrix.md` and the CHANGELOG for
+the full accounting.

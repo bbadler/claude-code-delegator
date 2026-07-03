@@ -1559,44 +1559,83 @@ def find_child_task_bounds(events, needle):
     return start_idx, task_id, done_idx
 
 
-def find_worker_active_bounds(events):
-    """The worker AGENT's own active window (first SubagentStart -> the next
-    SubagentStop), matching EXACTLY what campaign_has_outstanding_work()
-    itself inspects (registry `status`, derived from these same two event
-    types by hooks/ledger.py's fold_registry()) -- deliberately NOT the raw
-    backgrounded Bash task's own separate lifecycle (find_child_task_bounds
-    above): a real ordering bug caught live during this test's own build --
-    the Bash tool's own guardrail against a standalone chained
-    `sleep && echo` can reject the worker's FIRST attempt outright (no
-    task_started at all for it), forcing a retry with `run_in_background:
-    true` added, whose OWN task_started can land AFTER a Stop block that
-    already correctly saw the WORKER AGENT as active during that failed
-    first attempt -- i.e. genuinely before the child's real work had even
-    successfully started being tracked, which a naive task-bookkeeping-only
-    ordering check would wrongly read as "block came before start". The
-    agent's own SubagentStart/Stop window has no such gap: it opens the
-    moment the Agent tool dispatches the worker (before ANY of its own Bash
-    attempts, successful or not) and closes only when the worker genuinely
-    reports back. This is the PRIMARY ordering anchor test_a10 grades on;
-    find_child_task_bounds is kept as secondary, informational corroboration
-    (confirms the real child command's own bookkeeping when it's cleanly
-    available) but never gates PASS/FAIL on its own. Returns (start_idx,
-    done_idx); either may be None if not found."""
-    start_idx = None
+def find_worker_active_windows(events):
+    """ALL of the worker AGENT's own active windows -- one per
+    SubagentStart -> SubagentStop cycle, in stream order -- matching EXACTLY
+    what campaign_has_outstanding_work() itself inspects (registry `status`,
+    derived from these same two event types by hooks/ledger.py's
+    fold_registry()) -- deliberately NOT the raw backgrounded Bash task's own
+    separate lifecycle (find_child_task_bounds above): a real ordering bug
+    caught live during this test's own build -- the Bash tool's own
+    guardrail against a standalone chained `sleep && echo` can reject the
+    worker's FIRST attempt outright (no task_started at all for it), forcing
+    a retry with `run_in_background: true` added, whose OWN task_started can
+    land AFTER a Stop block that already correctly saw the WORKER AGENT as
+    active during that failed first attempt -- i.e. genuinely before the
+    child's real work had even successfully started being tracked, which a
+    naive task-bookkeeping-only ordering check would wrongly read as "block
+    came before start". The agent's own SubagentStart/Stop signal has no
+    such gap: it opens the moment the Agent tool dispatches the worker
+    (before ANY of its own Bash attempts, successful or not).
+
+    A SECOND real bug caught live (this run, not design-time): a worker can
+    rest WITHOUT having delivered its real result (e.g. it ends its turn
+    passively waiting on a Monitor notification instead of polling), which
+    fires its own SubagentStop even though the task is not actually done --
+    the delegator then has to notice (via the outstanding-work check) and
+    SendMessage a nudge, which re-fires SubagentStart for the SAME agent_id
+    and opens a SECOND active window before the worker's real, final
+    SubagentStop. A single first-Start..first-Stop PAIR (an earlier version
+    of this function) only captures the FIRST such window and wrongly
+    treats a block landing during a LATER (post-nudge) window as "after the
+    agent had already stopped" -- a false FAIL despite the gate having
+    correctly intercepted a genuinely still-outstanding agent. This function
+    instead returns every window as its own (start_idx, done_idx) pair (see
+    block_within_any_active_window below for how test_a10 uses this) so a
+    correct block in ANY cycle is recognized. This is the PRIMARY ordering
+    anchor test_a10 grades on; find_child_task_bounds is kept as secondary,
+    informational corroboration (confirms the real child command's own
+    bookkeeping when it's cleanly available) but never gates PASS/FAIL on
+    its own. Returns a list of (start_idx, done_idx) tuples in stream order;
+    a trailing window still open when the stream ends is returned with
+    done_idx=None (treated as extending to the end of the stream)."""
+    windows = []
+    open_start = None
     for i, d in enumerate(events):
-        if d.get("hook_event") == "SubagentStart":
-            start_idx = i
-            break
-    if start_idx is None:
-        return None, None
-    done_idx = None
-    for i, d in enumerate(events):
-        if i <= start_idx:
-            continue
-        if d.get("hook_event") == "SubagentStop":
-            done_idx = i
-            break
-    return start_idx, done_idx
+        ev = d.get("hook_event")
+        if ev == "SubagentStart":
+            if open_start is None:
+                open_start = i
+            # A SECOND SubagentStart while one is already open is the
+            # live-observed dual-hook-registration duplicate (hooks.json AND
+            # delegator-hooks.json both wiring the same event) -- it does
+            # NOT open a second window on top of an already-open one.
+        elif ev == "SubagentStop":
+            if open_start is not None:
+                windows.append((open_start, i))
+                open_start = None
+            # A SubagentStop with nothing open is the same duplicate-wiring
+            # artifact on the closing side -- nothing to close twice.
+    if open_start is not None:
+        windows.append((open_start, None))
+    return windows
+
+
+def block_within_any_active_window(block_idx, windows):
+    """True if block_idx falls strictly inside ANY of the worker's active
+    windows (see find_worker_active_windows) -- a done_idx of None means
+    that window was still open when the stream ended, i.e. extends to
+    +infinity for this purpose."""
+    for start_idx, done_idx in windows:
+        if start_idx < block_idx and (done_idx is None or block_idx < done_idx):
+            return True
+    return False
+
+
+def format_windows(windows):
+    return "; ".join(
+        f"[{s}..{'open' if d is None else d}]" for s, d in windows
+    ) if windows else "(none found)"
 
 
 def test_a10():
@@ -1678,7 +1717,7 @@ def test_a10():
         reasons.append(f"nonce {nonce} not found in the delegator's final result text -- see {out}")
 
     block_idx, block_ev = find_first_stop_block(events)
-    agent_start_idx, agent_done_idx = find_worker_active_bounds(events)
+    agent_windows = find_worker_active_windows(events)
     # Secondary, informational-only corroboration -- the real child command's
     # own bash-level bookkeeping, when cleanly available. Logged for
     # transparency but never gates PASS/FAIL (see find_child_task_bounds's
@@ -1689,15 +1728,13 @@ def test_a10():
         reasons.append("no Stop-hook BLOCK decision found anywhere in the raw hook telemetry -- "
                         "stop_gate.py was never exercised on this run (see this test's docstring: "
                         "this is the exact ambiguity it exists to catch, not something to paper over)")
-    if agent_start_idx is None or agent_done_idx is None:
-        reasons.append(f"could not locate the worker agent's own SubagentStart/SubagentStop window in "
-                        f"the stream (agent_start_idx={agent_start_idx} agent_done_idx={agent_done_idx})")
+    if not agent_windows:
+        reasons.append("could not locate any worker agent SubagentStart/SubagentStop window in the stream")
 
-    if not reasons and not (agent_start_idx < block_idx < agent_done_idx):
-        reasons.append(f"Stop-block at stream idx {block_idx} does not fall strictly within the worker "
-                        f"agent's own active window (SubagentStart idx {agent_start_idx} .. SubagentStop "
-                        f"idx {agent_done_idx}) -- not proof the block happened while the registry "
-                        f"genuinely showed it active")
+    if not reasons and not block_within_any_active_window(block_idx, agent_windows):
+        reasons.append(f"Stop-block at stream idx {block_idx} does not fall strictly within ANY of the "
+                        f"worker agent's own active windows ({format_windows(agent_windows)}) -- not proof "
+                        f"the block happened while the registry genuinely showed it active")
 
     if reasons:
         record(tid, "FAIL", "; ".join(reasons))
@@ -1710,9 +1747,9 @@ def test_a10():
     record(tid, "PASS",
            f"nonce={nonce} present in final result (sentinel='{sentinel}'); real Stop-hook BLOCK at "
            f"stream idx {block_idx} (reason: {(reason_m.group(1)[:150] if reason_m else '?')}) fell "
-           f"strictly within the worker agent's own active window (SubagentStart idx {agent_start_idx} "
-           f".. SubagentStop idx {agent_done_idx}) -- the gate genuinely intercepted a premature "
-           f"end-of-turn attempt while the registry showed the child still active, not after the fact"
+           f"strictly within one of the worker agent's own active windows ({format_windows(agent_windows)}) "
+           f"-- the gate genuinely intercepted a premature end-of-turn attempt while the registry showed "
+           f"the child still active, not after the fact"
            f"{task_note}; raw stream: {out}")
 
 
