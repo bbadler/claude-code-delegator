@@ -54,12 +54,19 @@ race in the registry fold, closed by moving the read inside the lock).
 project): `ledger.py` never prints anything, on any path, success or fail-open —
 zero `print()` calls exist in the file, confirmed live by capturing real hook
 telemetry (`--include-hook-events`) around it: every firing shows empty stdout.
-`watchdog.py` is different by design — it is **not** registered in `hooks/hooks.json`
-or `hooks/delegator-hooks.json` at all, so it never auto-fires; it's armed directly
-by a running delegator as a background process, and its alert lines are the
-entire point of running it. That output is a deliberate, scoped context injection
-(confined to campaigns that are actually registered — see "Dead-man watchdog"
-below), not a standing token cost like an auto-firing hook's stdout would be.
+`watchdog.py` is also hook-registered now (v1.3.0, see "Dead-man watchdog /
+proactive alerts" below) and is the **one deliberate exception**: it stays
+silent unless a registered campaign genuinely has a stale agent, and even then
+the only thing it ever emits is a single structured
+`{"hookSpecificOutput": {...}}` JSON object — never a bare `print()`. This
+distinction is load-bearing, not cosmetic: bare stdout on a hook gets captured
+in Claude Code's own internal telemetry but is **not** surfaced to the model at
+all (live-probed, see the v1.3.0 CHANGELOG entry) — only the structured JSON
+form actually becomes visible conversation context, and only for some event
+types (also probed; see below). `watchdog.py` additionally supports a
+standalone manual/background-arm mode predating hook-registration, which still
+works unchanged and is unaffected by any of this (its stdout there is read
+directly by whatever process armed it, not by Claude Code's hook system).
 
 ## What this proves (probe-verified, Claude Code 2.1.198 — original N1 probe)
 
@@ -245,7 +252,7 @@ storage, one directory per delegator session:
   class of bug reappeared for the 4th (`agents`-as-list) shape before it was
   explicitly recognized — both are exactly why unrecognized-but-real content
   now gets a no-write skip instead of a 5th blind spot. See
-  `_normalize_existing()`'s docstring in `ledger.py` for the full account,
+  `normalize_existing()`'s docstring in `ledger.py` for the full account,
   including why a genuinely fresh/absent registry is NOT treated the same way
   (it's the one case where starting from empty is actually correct).
 - **Routing** (`resolve_project_dir` + `resolve_home_session_id` in `ledger.py`;
@@ -281,21 +288,72 @@ never changes the session id — the "re-upsert on every resume" step this desig
 originally anticipated is only load-bearing for the separate, non-default
 `--fork-session` path.
 
-## Dead-man watchdog (N2)
+## Dead-man watchdog / proactive alerts (N2 + v1.3.0, github issue #1)
 
-`watchdog.py` (stdlib `json`/`datetime`/`re`, no `jq`) reads one campaign's
-`events.jsonl` (or every campaign under a project, if you don't name one — see
-below) and prints one line per anomaly:
+`watchdog.py` (stdlib `json`/`datetime`/`re`, no `jq`) has two independent modes,
+dispatched by whether it's given any positional argument (see its module docstring
+for the full account):
+
+### Hook mode (auto-wired, v1.3.0 — this is the default now)
+
+Registered in both `hooks/hooks.json` (plugin) and `hooks/delegator-hooks.json`
+(classic) on `PostToolUse` (matcher `Agent|SendMessage`, the same matcher
+`ledger.py` uses), `UserPromptSubmit`, and `TeammateIdle` — Claude Code invokes it
+bare, payload on stdin, exactly like `ledger.py`. It resolves the campaign the
+same way (`transcript_path` → project dir → that project's `delegator/sessions.json`
+→ home session id; unregistered session or no campaign ever run there → silent
+no-op, zero writes, same contract as `ledger.py`). For every agent in that
+campaign's `registry.json` whose `status` is NOT `stopped`/`retired`/`died`, it
+checks how long it's been silent (now minus its latest `events.jsonl` timestamp)
+against that agent's own `soft_timeout_minutes` (a judgment field the delegator
+charter writes; **default 15** if absent or invalid). Past threshold and not
+already alerted in the last **10 minutes** (a `last_alert_at` mechanical field it
+stamps onto the agent's own registry entry, reusing `ledger.py`'s exact lock and
+shape-tolerant read/write logic — `import ledger` works because both files live
+in this same directory), it emits exactly one structured hook output:
+
+```json
+{"hookSpecificOutput": {"hookEventName": "<whichever event fired>", "additionalContext": "STALE_AGENT <name> silent <N>m last_event=<type> (owes: <description-or-purpose>)"}}
+```
+
+Multiple stale agents at once get newline-joined into that one `additionalContext`
+string. Nothing at all is emitted if no agent is stale — this remains the common
+case and the one deliberate exception is scoped exactly as narrowly as possible.
+
+**Why `PostToolUse`/`UserPromptSubmit` and not `SubagentStop`, even though
+`SubagentStop` is the more obvious "a child just went idle" moment**: live-probed
+on Claude Code 2.1.199, the structured JSON form above genuinely reaches the
+calling session's context on `PostToolUse` and `UserPromptSubmit` (confirmed by
+the model quoting injected text back character-for-character, including a
+dynamic elapsed-time value, in both a targeted probe and later end-to-end
+campaign tests) — but **not** on `SubagentStop`, despite it firing, exiting 0,
+and Claude Code's own telemetry showing well-formed output captured. Three
+convergent negative tests (bare stdout, the correct JSON schema, a same-turn
+follow-up tool call) against a clean positive control settled this; see the
+v1.3.0 CHANGELOG entry for the full probe log. `ledger.py` keeps listening to
+`SubagentStop` for its own event-collection purposes — that finding doesn't
+affect it, since it never tries to inject anything. `TeammateIdle` is wired as
+unconfirmed upside: **UNPROBED**, not claimed as working — two honest live
+attempts to trigger a genuine idle transition were both structurally blocked (a
+one-shot session can't produce one; `--bg` needs a real interactive TTY this
+automation can't drive). A silent no-op if that event type turns out not to
+support injection costs nothing, so it stays wired rather than removed.
+
+### Manual/background mode (original N2 design, predates hook-registration)
+
+Still works standalone, unaffected by any of the above (its stdout is read
+directly by whatever process arms it, never by Claude Code's hook system).
+Given a positional `workspace-dir` argument, prints one line per anomaly instead
+of emitting structured JSON:
 
 ```
 WATCHDOG: <type> <agent> <evidence>                        (single campaign)
 WATCHDOG: [<home-session-id>] <type> <agent> <evidence>     (scanning more than one)
 ```
 
-It is not registered as a hook anywhere (see "Stdout silence" above) and does not
-integrate with `Monitor` yet (that's future work) — for now, the delegator arms it
-itself as a background `Bash` job at session start, passing its own workspace and
-(recommended) its own home session id so it only ever watches its own campaign:
+Arm it as a background `Bash` job at session start, passing your own workspace
+and (recommended) your own home session id so it only ever watches its own
+campaign:
 
 ```bash
 DELEGATOR_REPO=/path/to/claude-code-delegator
@@ -311,14 +369,18 @@ python3 "$DELEGATOR_REPO/hooks/watchdog.py" "$PWD"                    # every ca
 python3 "$DELEGATOR_REPO/hooks/watchdog.py" "$PWD" 20 "$HOME_SESSION_ID"  # just this one
 ```
 
-Anomaly types it currently detects — both read straight from a campaign's
-`events.jsonl`, so they only ever fire once that campaign has real ledger activity:
+Anomaly types this mode detects — both read straight from a campaign's
+`events.jsonl`, narrower than hook mode's status-aware check above (this mode
+predates the registry-status/threshold/dedupe logic and was left unchanged to
+avoid breaking anyone already relying on it):
 
-- `STALE_AGENT` — an agent whose `last_event_type` is `SubagentStart` (i.e. it never
-  reached `SubagentStop`/`PostToolUse`) with no ledger row in the last `$STALE_MIN`
-  minutes (default 20, matching the render-threshold figure in the roadmap).
+- `STALE_AGENT` — an agent whose `last_event_type` is *literally* `SubagentStart`
+  (i.e. it never reached `SubagentStop`/`PostToolUse` at all) with no ledger row
+  in the last `$STALE_MIN` minutes (default 20). Hook mode's check is broader —
+  any active agent silent past its own threshold, regardless of what its last
+  event type was.
 - `UNANSWERED_GATE` — a `last_summary` containing a gate marker (`gate`/`GATE`/`SendMessage me`)
   with no later event for that `session_id` afterward.
 
-Backoff/re-fire scheduling and a `Monitor`-native version are out of scope for this
-pass (see roadmap N2 "why now" — the current script is intentionally small).
+Backoff/re-fire scheduling and a `Monitor`-native version remain out of scope
+(see roadmap N2 "why now" — the scripts are intentionally small).

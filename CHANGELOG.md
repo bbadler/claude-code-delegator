@@ -2,6 +2,90 @@
 
 All notable changes to `claude-code-delegator` are documented here.
 
+## v1.3.0 (2026-07-03)
+
+### Proactive watchdog: automatic STALE_AGENT alerts (github issue #1)
+
+- **The mechanical half of "stalls should be caught by the delegator, not the
+  human"**: a real live campaign hit children going idle mid-task without
+  reporting back, sitting silent until a human noticed and pointed it out
+  twice before the delegator investigated (full repro in issue #1). This ships
+  the automatic-detection half — `hooks/watchdog.py` is now hook-registered
+  (previously manual-arm only) and injects a `STALE_AGENT` notice directly
+  into the delegator's own context the moment any registered campaign has an
+  active agent that's gone quiet past its own threshold, with zero reliance on
+  the delegator remembering to check.
+- **PHYSICS FINDING, release-notes-worthy on its own**: the obvious design —
+  wire the alert to `SubagentStop`, the event that fires exactly when a child
+  finishes or goes idle — **does not work**. Live-probed on Claude Code 2.1.199:
+  structured `{"hookSpecificOutput": {"hookEventName": ..., "additionalContext": ...}}`
+  output genuinely reaches the calling session's context for `PostToolUse` and
+  `UserPromptSubmit` (confirmed by the model quoting injected text back
+  character-for-character, including a dynamic value), but for `SubagentStop`
+  specifically it does not — 3 convergent negative tests (bare stdout, the
+  correct JSON schema, a same-turn follow-up tool call) against a clean
+  positive control on `UserPromptSubmit`, ruling out a methodology error.
+  Claude Code's own hook telemetry shows the `SubagentStop` hook firing,
+  exiting 0, and producing well-formed output — the model just never sees it.
+  Alerts are wired to `PostToolUse` (matcher `Agent|SendMessage`, the same
+  matcher `hooks/ledger.py` uses — this covers the delegator's own
+  spawn/nudge/gate-answer moments) and `UserPromptSubmit` (covers "the human
+  returns and says anything → stale agents surface immediately", issue #1's
+  scenario inverted). `hooks/ledger.py` keeps listening to `SubagentStop` for
+  its own event-collection purposes, unaffected by this finding — the split is
+  clean: `SubagentStop` feeds data, `PostToolUse`/`UserPromptSubmit` deliver
+  alerts. `TeammateIdle` is wired too, as unconfirmed upside (a silent no-op if
+  it doesn't support injection costs nothing) — two honest live attempts to
+  trigger a genuine idle transition were both structurally blocked (a one-shot
+  session can't produce one; `--bg` needs a real interactive TTY this
+  automation can't drive) — documented as UNPROBED, not claimed as working.
+- **Alert format**: `STALE_AGENT <name> silent <N>m last_event=<type> (owes:
+  <description-or-purpose>)`, one line per stale agent, newline-joined into a
+  single `additionalContext` if more than one agent is stale at once. Only
+  agents whose registry `status` is NOT `stopped`/`retired`/`died` are
+  considered. Threshold is a per-agent `soft_timeout_minutes` judgment field
+  (the delegator charter writes it; default 15 if absent/invalid). Alerts
+  dedupe per agent for 10 minutes via a new `last_alert_at` mechanical field
+  stamped onto that agent's own registry entry — load-bearing specifically on
+  `UserPromptSubmit`, since that fires on every single user turn, not just
+  when the delegator acts.
+- **`hooks/ledger.py` refactor enabling this safely**: extracted the
+  shape-dispatch write-back logic from `fold_registry()` into a new shared
+  `write_registry_shape()` function, and renamed `_normalize_existing()` to
+  `normalize_existing()` (dropping the leading underscore — it's no longer
+  private to `ledger.py` alone). `hooks/watchdog.py` now does
+  `import ledger` (works because both files live in `hooks/` together) and
+  calls these exact same functions to safely stamp `last_alert_at`, so its
+  registry write can never drift from `fold_registry()`'s own understanding of
+  registry shape — the entire reason the last two registry bugs existed was
+  exactly this kind of duplicated understanding going stale in one place but
+  not the other. Confirmed behavior-preserving: re-ran all 5 prior
+  shape/no-write fault-injection cases against the refactored code, identical
+  results.
+- **Fault-injected directly (12 cases) then proven end-to-end live (6 probes)**:
+  direct calls to the new hook-mode logic covered default/custom thresholds,
+  status exclusion, dedup both directions, multi-agent alerts in one
+  `additionalContext`, missing registry entries, and a missing registry file
+  entirely — all passed. Separately, a real campaign in an isolated scratch
+  `$HOME` (never the real one) proved the full path end-to-end: a genuinely
+  stale real agent's alert reached the model's own context verbatim (matching
+  its actual elapsed silence), a stopped agent and fresh activity both stayed
+  silent, the dedup window suppressed a same-agent re-alert within 10 minutes
+  and correctly re-fired after backdating past it, an unregistered session
+  produced zero output and zero writes anywhere (workspace tree byte-identical
+  before/after), and `hooks/ledger.py`'s own event collection was confirmed
+  unaffected. One methodology note worth keeping: hand-editing a registry
+  entry to simulate staleness and then firing ANOTHER `PostToolUse(Agent)`
+  event doesn't work as a test technique, because `fold_registry()` (which
+  also listens to that event) re-derives the real status from `events.jsonl`
+  history and overwrites the simulated edit before `watchdog.py` runs — not a
+  bug, a real and arguably desirable self-healing property of the design, just
+  something to route around when hand-simulating staleness for a test.
+
+### `.claude-plugin/plugin.json`
+
+- Version bumped to 1.3.0.
+
 ## v1.2.4 (2026-07-03)
 
 - **Skill gates: the delegator answers them ITSELF (operator clarification of

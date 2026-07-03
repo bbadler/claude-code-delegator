@@ -184,7 +184,7 @@ def read_sidecar(transcript_path, agent_id):
         return {}
 
 
-def _normalize_existing(existing):
+def normalize_existing(existing):
     """The pre-existing registry.json can be in ANY of the shapes below -- this
     hook does not control what the delegator hand-writes, and agents/delegator.md's
     Registry section pins the PER-ENTRY field schema ({name, agent_id, session_id,
@@ -264,13 +264,48 @@ def _normalize_existing(existing):
     return None
 
 
+def write_registry_shape(registry_path, shape, entries, passthrough, extra_keys):
+    """Write registry entries back to disk in the given shape (one of
+    normalize_existing()'s 4 recognized return shapes) -- extracted as its own
+    function so fold_registry() below and hooks/watchdog.py's staleness-alert
+    dedup stamp (which also needs to safely update ONE field on existing
+    registry entries) share the exact same shape-dispatch logic instead of each
+    maintaining their own copy that could quietly drift out of sync -- the
+    entire reason the last two registry bugs existed was exactly this kind of
+    duplicated understanding of "shape" going stale in one place but not the
+    other. Callers MUST hold the ledger_dir's .registry.lock before calling this
+    and must have already confirmed `shape` came from a real normalize_existing()
+    call (never pass a guessed shape). Writes via a temp file + os.replace for
+    an atomic swap; never partial-writes registry.json."""
+    if shape == "list":
+        out = dict(extra_keys)
+        out.setdefault("version", 1)
+        out["orchestrators"] = list(entries.values()) + passthrough
+        out["updated_at"] = now_iso()
+    elif shape == "bare_list":
+        out = list(entries.values()) + passthrough
+    elif shape == "agents_list":
+        out = dict(extra_keys)
+        out["agents"] = list(entries.values()) + passthrough
+        out["updated_at"] = now_iso()
+    else:
+        out = dict(extra_keys)
+        out["agents"] = entries
+        out["updated_at"] = now_iso()
+
+    tmp_path = registry_path + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(out, f, indent=2, sort_keys=True, ensure_ascii=False)
+    os.replace(tmp_path, registry_path)
+
+
 def fold_registry(ledger_dir):
     """Merge-aware: only sets/refreshes the MECHANICAL fields derived from the
     ledger (status, agent_type, name, depth, description, last_event*, session_id)
     on each agent's entry by agent_id, never touching keys it doesn't produce --
     see agents/delegator.md's Registry section for the judgment fields this leaves
     alone, and hooks/README.md for the open question that split raises. Handles
-    ALL FOUR pre-existing shapes via _normalize_existing -- see its docstring for
+    ALL FOUR pre-existing shapes via normalize_existing -- see its docstring for
     the two clobber bugs this replaced: the canonical dict-shaped registry.json
     (this script's own {"agents": {<agent_id>: {...}}} format), the delegator's
     hand-written {"version":N,"orchestrators":[...]} list shape, a bare top-level
@@ -325,7 +360,6 @@ def fold_registry(ledger_dir):
         a.setdefault("status", "unknown")
 
     lock_path = os.path.join(ledger_dir, ".registry.lock")
-    tmp_path = registry_path + ".tmp"
     with open(lock_path, "a") as lockf:
         if not flock_ex(lockf):
             return  # fail-open: skip this fold rather than race the file unlocked
@@ -344,14 +378,14 @@ def fold_registry(ledger_dir):
                     # treat it as empty-and-safe-to-overwrite: whatever real
                     # content it had before is unknown, and this hook has no
                     # business destroying it. Skip this fold entirely, same as
-                    # the unrecognized-shape case _normalize_existing() flags
+                    # the unrecognized-shape case normalize_existing() flags
                     # with None below -- losing one mechanical update is cheap,
                     # silently destroying judgment fields is not.
                     return
-            normalized = _normalize_existing(existing)
+            normalized = normalize_existing(existing)
             if normalized is None:
                 # Parsed fine, but matches none of the known shapes -- see
-                # _normalize_existing()'s docstring. Same no-write rule.
+                # normalize_existing()'s docstring. Same no-write rule.
                 return
             shape, merged_entries, passthrough, extra_keys = normalized
             for aid, derived in agents.items():
@@ -363,25 +397,7 @@ def fold_registry(ledger_dir):
             # convert a hand-written list into this script's own dict shape (or
             # vice versa); a fresh/never-written registry defaults to the
             # canonical dict shape, matching pre-dual-shape behavior exactly.
-            if shape == "list":
-                out = dict(extra_keys)
-                out.setdefault("version", 1)
-                out["orchestrators"] = list(merged_entries.values()) + passthrough
-                out["updated_at"] = now_iso()
-            elif shape == "bare_list":
-                out = list(merged_entries.values()) + passthrough
-            elif shape == "agents_list":
-                out = dict(extra_keys)
-                out["agents"] = list(merged_entries.values()) + passthrough
-                out["updated_at"] = now_iso()
-            else:
-                out = dict(extra_keys)
-                out["agents"] = merged_entries
-                out["updated_at"] = now_iso()
-
-            with open(tmp_path, "w") as f:
-                json.dump(out, f, indent=2, sort_keys=True, ensure_ascii=False)
-            os.replace(tmp_path, registry_path)
+            write_registry_shape(registry_path, shape, merged_entries, passthrough, extra_keys)
         finally:
             flock_un(lockf)
 

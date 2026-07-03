@@ -3,7 +3,10 @@
     "PostToolUse": [
       {
         "matcher": "Agent|SendMessage",
-        "hooks": [{"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/ledger.py"}]
+        "hooks": [
+          {"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/ledger.py"},
+          {"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/watchdog.py"}
+        ]
       }
     ],
     "SubagentStart": [
@@ -13,7 +16,15 @@
       {"hooks": [{"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/ledger.py"}]}
     ],
     "TeammateIdle": [
-      {"hooks": [{"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/ledger.py"}]}
+      {
+        "hooks": [
+          {"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/ledger.py"},
+          {"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/watchdog.py"}
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/watchdog.py"}]}
     ]
   }
 }
