@@ -2,7 +2,178 @@
 
 All notable changes to `claude-code-delegator` are documented here.
 
-## Unreleased
+## v1.4.0 (2026-07-03)
+
+### Verified state (honest — release-gate spot-check by the delegator)
+
+The gate MECHANISM is proven: a synthetic Stop payload against an owing campaign
+registry yields exactly `{"decision":"block", "reason":"Busy-presence check…"}` and an
+empty allow on a settled one (plus 4 real `Stop hook feedback` blocks in the `calib2`
+hand-probe). `idle_gate.py` A9 e2e: clean PASS via real team formation. Unit
+fault-injections: 9/9.
+
+**Known issues shipped as documented, not hidden** (per operator "works-is-enough" trim
+— full-suite regression, cold-verify, and repeated e2e were cut):
+- `test_a10()` automated regression does NOT pass (7/7 attempts failed: rate-limits,
+  timeouts, and a "nonce not found" bookkeeping bug). The gate mechanism is proven by
+  the synthetic + calib2 evidence above; the automated e2e wrapper has a findable bug —
+  fix before trusting A10 as a green CI gate.
+- **Loop guard fixed post-report**: `stop_gate.py` ignored `stop_hook_active`, so a
+  continuation chain could re-block instead of concluding once (a likely contributor to
+  the A10 timeouts). Now allows when `stop_hook_active` is true; re-verified by synthetic
+  probe (block-once, re-engage on fresh stop). No live session needed.
+- **Release-contract divergence**: the gate keys off `status=="active"` + a top-level
+  `rest_ok` escape, NOT the charter's per-agent `owes` field. Flipping `owes:false` alone
+  does not release the gate today. Reconcile the charter's owes-contract with the gate's
+  status-based logic in a follow-up (no `stop_blocks` consecutive-valve yet either).
+
+### Mechanical busy-presence gates (GATES v2) — replaces charter-discipline polling
+
+- **Why**: A8 (below) proved the busy-presence rule works when the delegator *chooses*
+  to comply with its own charter — but that's still discipline, not enforcement. The
+  operator ordered a pivot mid-A8 (`TaskStop`, A8 aborted — its test functions and
+  prompt templates are left in `testbed/run_all.py`, uncalled, for A10 to recycle
+  rather than rebuild): if Claude Code's own hook system can *mechanically* block a
+  premature Stop/TeammateIdle, busy-presence no longer depends on model compliance
+  at all. Four foundational claims were live-probed before building anything —
+  **do not trust the docs alone** was the operating rule, and it caught real gaps:
+  1. **P1 — Stop force-continue: CONFIRMED.** `{"decision":"block","reason":"..."}`
+     on the `Stop` event genuinely prevents the process from exiting; delivered to
+     the model as a synthetic user turn (`"Stop hook feedback:\n<reason>"`); the
+     model complied and produced exactly the continuation asked for. `stop_hook_active`
+     flips `true` on the retry — the loop-guard signal a gate checks to know it's
+     seeing a re-fire, not a fresh attempt.
+  2. **P2 — SubagentStop feeds the STOPPING SUBAGENT, not the parent: CONFIRMED.**
+     Reconciles the v1.3.0 finding that `additionalContext` never reaches the main
+     session from `SubagentStop` — with `decision:"block"` it targets the child
+     instead, and the child's own `stop_hook_active` flips true, proving the
+     mechanism. **Real nuance found**: phrasing the injected reason as a bare
+     imperative ("you MUST do X") gets the child to recognize it as
+     prompt-injection-shaped and explicitly *refuse* the instruction, even though
+     the block itself still forces another turn. Both gates below phrase their
+     reason as factual state ("registry shows...") rather than a command, because
+     of this finding.
+  3. **P3 — SubagentStart birth injection: CONFIRMED.** Delivered via a distinct
+     `hook_additional_context` *attachment* event, not a synthetic user turn like
+     Stop/SubagentStop — a genuinely different delivery shape, not currently used by
+     either gate below but confirmed available for future campaign-context-at-birth
+     work.
+  4. **P4 — TeammateIdle blocking: CONFIRMED**, after ruling out two wrong
+     hypotheses first: a named+background Agent-tool spawn from a `-p` lead never
+     fires `TeammateIdle` at all, and neither does a root `claude --bg` session
+     (which *did* reveal `--bg` sessions are scriptable non-interactively via
+     `claude agents --json`/`claude logs`/`claude stop` — updates a prior belief in
+     this repo). The real trigger needs genuine Claude Code "team" formation
+     (`~/.claude/teams/session-*/config.json`) — reached here via a detached `tmux`
+     pane, a new technique for this repo. Blocks via **plain exit code 2 + stderr**
+     text (not the JSON `decision` form) — a genuinely different schema from
+     Stop/SubagentStop, delivered as a synthetic user turn labeled
+     `"TeammateIdle hook feedback:\n[<hook command>]: <stdout+stderr>"`.
+  - **Operational gotcha found across all four probes**: any stray stderr output
+    from a hook script (even an incidental Python `DeprecationWarning`) surfaces to
+    the user and can trigger a "Stop hook error" UI notification, even when the
+    block itself works correctly — both gates below are written stderr-clean except
+    for `idle_gate.py`'s one deliberate, load-bearing stderr write when actually
+    blocking.
+- **`hooks/stop_gate.py`** (new) — registered on `Stop`. **`hooks/idle_gate.py`**
+  (new) — registered on `TeammateIdle`, alongside `hooks/ledger.py`/`hooks/watchdog.py`
+  which already listen there. Both share one outstanding-work check,
+  `hooks/ledger.py`'s new `campaign_has_outstanding_work()` — one source of truth
+  so the two gates can never silently diverge on what counts as "busy", the same
+  drift class that caused the registry shape bugs this module already fixed twice.
+  The check has **three valves**: two that trigger a block —
+  (1) any registered agent whose `status` is not `stopped`/`retired`/`died` (a
+  child still actively running, per `fold_registry()`'s own status derivation),
+  (2) an unanswered-gate condition in `events.jsonl` (reusing
+  `hooks/watchdog.py`'s `check_unanswered_gates()`, not duplicating it) — and one
+  release valve: an explicit `rest_ok: true` at `registry.json`'s top level, written
+  only by a delegator itself, which always wins over either trigger — the
+  delegator's own informed judgment (it reached one of its three legitimate
+  end-states per `agents/delegator.md`'s Forward-pressure section) overrides a
+  possibly-stale mechanical read. Both gates fail-open on every uncertain case
+  (missing/corrupt registry, unresolved campaign, any exception) — they only ever
+  block on positive evidence of outstanding work, never on doubt. Neither gate ever
+  creates a directory or file. 9 fault-injection cases (owing→block, done→allow,
+  `rest_ok` valve trip→allow, unanswered-gate→block, unregistered session→untouched,
+  corrupt registry→fail-open, no registry→fail-open, mixed active/stopped agents
+  →names only the active one, no campaign at all→untouched) all pass directly
+  against both gate scripts.
+- **A9/A10 — live end-to-end evidence, checked against artifacts already on disk
+  per an operator trim order (no new e2e attempts launched, no full regression
+  suite — see below). Reporting both honestly, including where A10 did NOT
+  cleanly pass**:
+  - **A9 (idle-gate e2e, `testbed/run_all.py`'s real `test_a9()`) — PASS.**
+    Direct evidence from a completed run (`/tmp/.../a9-drive.log`): a genuine
+    Claude Code team formed, the named backgrounded teammate did real work
+    (wrote its marker file), `idle_gate.py`'s FIRST `TeammateIdle` block reached
+    it citing the seeded `a9-seed` row verbatim
+    (`"TeammateIdle hook feedback:\n[python3 .../hooks/idle_gate.py]: Busy-presence
+    check: still-active agent(s): a9-seed..."`), and after the test harness set
+    `rest_ok:true` (standing in for the human/owning-process confirmation a real
+    delegator would need — see below), the teammate's registry row settled to
+    `status:"stopped"` with no further block. Clean pass, all three conditions the
+    test requires.
+    - **A genuinely useful earlier finding, from design-time calibration, not
+      this run**: an EARLIER hand-probe (before `test_a9()`'s current fixture
+      design existed, using a differently-named fixture, `seed-worker`) revealed
+      that a real delegator session, asked to clear the SAME kind of seeded
+      "still active" row itself, correctly REFUSED to fabricate `rest_ok:true`
+      without genuine verification — producing an honest, if unresolved,
+      deadlock rather than false confirmation. That finding is *why* `test_a9()`
+      has the test harness itself provide the resolution (mimicking a real
+      human/owning-process confirming the item), rather than expecting the model
+      to self-clear an item it has no way to verify — a real design lesson, kept
+      here for the record, not a result from the run being reported as PASS above.
+      It also surfaces a genuine production risk worth a documented recovery path
+      before this ships unattended: an orphaned/stuck-`active` registry row with
+      no real owner has no built-in way to clear itself (a human confirmation, or
+      a staleness timeout on `active` status, are the two options that come to
+      mind). Evidence: `/tmp/delegator-a9-calib-dump.jsonl` (17 lines, full
+      transcript).
+  - **A10 (stop-gate e2e, `testbed/run_all.py`'s real `test_a10()`) — FAIL across
+    all 7 recorded attempts** (the 7th finished on its own, found via a passive
+    check — not relaunched or waited on, per the trim order: no babysitting, no
+    launching an 8th). Honest accounting, not glossed over: attempt 1 hit a rate
+    limit then a 300s outer timeout; attempts 2-3 hit rate limits (no further
+    detail recorded); attempt 4 produced no log at all; attempt 5 FAILED on
+    `stop_gate.py` never being exercised at all on that run (registry already
+    showed nothing active by the time the top-level `Stop` fired — a
+    scenario-design edge case the test's own extensive docstring already
+    anticipated and explains); attempts 6-7 both FAILED on the SAME recurring
+    pattern — the nonce never appearing in the delegator's final result text /
+    "could not locate the child's own real background task bookkeeping in the
+    stream" — a repeated failure mode across the last two tries, not just
+    one-off flakiness, worth investigating specifically. **The underlying
+    MECHANISM is
+    separately, convincingly confirmed working** by an earlier, different,
+    hand-driven calibration probe (predating and informing `test_a10()`'s current
+    design, not a run of the actual test function) — `/tmp/a10-calib2-stream.jsonl`
+    shows repeated real `"Stop hook feedback:\nBusy-presence check:
+    still-active agent(s): <id>..."` blocks (`num_turns: 19` vs. a control run's
+    `2`) followed by the delegator's own final reply containing the correct
+    worker nonce. That's real evidence `stop_gate.py` itself works — but it is
+    NOT the same claim as "the automated `test_a10()` e2e test passes reliably,"
+    which as of this report it has not, in 6 real tries. This needs attention
+    (test-scenario timing/flakiness, or a genuine remaining gap) before A10 can
+    honestly be called a green permanent regression test.
+  - **Per operator trim order, explicitly NOT done and not claimed**: no full
+    default-set regression run against the gate-wired hooks (A0-A7 were not
+    re-verified with `stop_gate.py`/`idle_gate.py` live in the hook chain), no cold
+    verifier pass on this task, no additional e2e attempts beyond what's cited
+    above. `testbed/run_all.py`'s A8 calls are commented out (not deleted) with a
+    note explaining the pivot; its prompt templates/regexes are left in place.
+- **`hooks/hooks.json`/`hooks/delegator-hooks.json`**: `stop_gate.py` added as a new
+  `Stop` entry; `idle_gate.py` added alongside the existing `ledger.py`/`watchdog.py`
+  commands under `TeammateIdle`.
+- **`.claude-plugin/plugin.json`**: version bumped to 1.4.0.
+
+### A8 (built, then aborted mid-flight — kept in the record, not erased)
+
+Everything below shipped code-complete and was live-tested before the operator
+ordered a pivot to the mechanical gates above; `test_a8_a`/`test_a8_b` and their
+prompt templates remain in `testbed/run_all.py`, commented out of the default run
+rather than deleted, specifically so A10 above could recycle the nonce-child
+fixture design rather than rebuild it from scratch.
 
 - **A8 — permanent regression pair for the busy-presence rule (`agents/delegator.md`'s
   Forward-pressure section) and the HEADLESS END-OF-TURN RULE it generalizes**

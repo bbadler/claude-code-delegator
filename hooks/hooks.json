@@ -23,11 +23,19 @@
         ]
       }
     ],
+    "Stop": [
+      {
+        "hooks": [
+          {"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/stop_gate.py\"", "timeout": 10}
+        ]
+      }
+    ],
     "TeammateIdle": [
       {
         "hooks": [
           {"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py\"", "timeout": 10},
-          {"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/watchdog.py\"", "timeout": 10}
+          {"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/watchdog.py\"", "timeout": 10},
+          {"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/idle_gate.py\"", "timeout": 10}
         ]
       }
     ],

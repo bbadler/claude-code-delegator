@@ -15,11 +15,15 @@
     "SubagentStop": [
       {"hooks": [{"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/ledger.py"}]}
     ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/stop_gate.py"}]}
+    ],
     "TeammateIdle": [
       {
         "hooks": [
           {"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/ledger.py"},
-          {"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/watchdog.py"}
+          {"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/watchdog.py"},
+          {"type": "command", "command": "python3 __DELEGATOR_REPO__/hooks/idle_gate.py"}
         ]
       }
     ],

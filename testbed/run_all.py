@@ -9,9 +9,11 @@ unlike BSD vs GNU grep -E, which is exactly the kind of silent portability gap t
 port exists to remove).
 
 usage: ./run_all.py [--full]
-  (no args)  default set: A0-A6, A7 quick pair (t4,t5), A8 (a,b) — busy-presence /
-             timeout-suspicion regression pair (agents/delegator.md's Forward
-             pressure + HEADLESS END-OF-TURN RULE), see test_a8_a/test_a8_b below
+  (no args)  default set: A0-A6, A7 quick pair (t4,t5), A9 (idle-gate e2e), A10
+             (stop-gate e2e) — GATES v2 (v1.4.0) mechanical busy-presence
+             enforcement, see test_a9/test_a10 below. A8 (test_a8_a/test_a8_b,
+             the charter-discipline-only precursor these gates superseded) is
+             left defined but uncalled — see the comment above its call site.
   --full     also runs the heavier stress angles: A7-t6 (concurrent orchestrators),
              A7-t7 (campaign-resume chain t7a/b/c), A7-t8 (router edge / haiku)
 
@@ -1040,6 +1042,680 @@ def test_a8_b():
         record(tid, "FAIL", "; ".join(reasons))
 
 
+# ---------------------------------------------------------------------------
+# A9 / A10 -- GATES v2 (v1.4.0) mechanical-gate e2e proof. hooks/stop_gate.py
+# and hooks/idle_gate.py's own core logic (hooks/ledger.py's
+# campaign_has_outstanding_work()) is already fault-injected directly (unit
+# level, 9 cases) -- these two tests are the LIVE, permanent regression proof
+# that both gates actually fire and block in a real session, not just in
+# isolation. Both are designed so a clean PASS requires evidence the GATE
+# ITSELF did load-bearing work, not merely "a well-behaved delegator/teammate
+# happened to succeed anyway" -- see each test's own docstring for how.
+# ---------------------------------------------------------------------------
+
+def _read_jsonl_events(path):
+    """Parse a --output-format stream-json capture (one JSON object per
+    line) into a list, tolerating any unparseable/blank lines. List order IS
+    chronological event order -- stream-json is emitted as things actually
+    happen, so comparing indices is comparing real time ordering without
+    needing any wall-clock field from the payload itself."""
+    out = []
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    out.append(json.loads(line))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return out
+
+
+def _stream_result_event(events):
+    for d in reversed(events):
+        if d.get("type") == "result":
+            return d
+    return None
+
+
+def _stream_json_ok(path):
+    """run_with_retry_json's own ok_json() expects a SINGLE json.load()-able
+    object (--output-format json); a --output-format stream-json capture is a
+    JSONL file of many objects, which json.load() always fails on (trailing
+    data), so a stream-json invocation needs this sibling check instead:
+    success iff a well-formed, non-error {"type": "result"} event is present
+    ANYWHERE in the stream -- deliberately NOT "is the LAST line a result
+    event" (a real bug caught live during this test's own build: background
+    task cleanup notifications -- task_updated/task_notification for the
+    child's own backgrounded work -- can arrive AND get flushed to the file
+    AFTER the top-level result event has already been written, so the
+    textually-last line is not reliably the result line even on a fully
+    successful run)."""
+    events = _read_jsonl_events(path)
+    ev = _stream_result_event(events)
+    return bool(ev) and not ev.get("is_error")
+
+
+def _run_stream_json_once(out_path, cmd, cwd=None, timeout=900):
+    """Single-attempt run of a `--output-format stream-json --include-hook-events`
+    invocation; returns True iff _stream_json_ok(out_path). Deliberately NOT a
+    retry wrapper (unlike run_with_retry_json above) -- see test_a10's own
+    retry loop for why A10 mints a brand-new campaign (fresh --session-id) on
+    each attempt instead of reusing one fixed cmd list, unlike every other
+    retry in this file: reusing a --session-id across two separate
+    non-resumed `claude -p` calls is rejected outright by the CLI."""
+    out_path = Path(out_path)
+    err_path = Path(str(out_path) + ".stderr")
+    try:
+        with open(out_path, "wb") as out_f, open(err_path, "wb") as err_f:
+            subprocess.run(cmd, cwd=cwd, stdout=out_f, stderr=err_f, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        pass
+    except OSError as e:
+        try:
+            err_path.write_text(str(e))
+        except Exception:
+            pass
+    return _stream_json_ok(out_path)
+
+
+def _a10_is_rate_limited(out_path):
+    """Rate-limit detection for A10 specifically, deliberately NOT a raw
+    RATE_LIMIT_RE substring scan over the whole stream-json capture the way
+    every other retry in this file works (fine there -- --output-format json
+    is one short, compact object). Two real bugs caught live during this
+    test's own build, both from applying that same raw-scan idea to a
+    --include-hook-events capture instead:
+      1. stream-json emits its own routine `{"type": "rate_limit_event",
+         "rate_limit_info": {"status": "allowed_warning", ...}}` telemetry
+         message on essentially every run regardless of outcome -- purely
+         informational utilization tracking, not a rejection -- and
+         RATE_LIMIT_RE's `rate.?limit` alternative matches the TYPE NAME
+         itself, so a raw scan sees "rate-limited" on every single run.
+      2. Independently of (1): the full JSONL stream is packed with
+         incidental UUIDs and base64 `thinking`-block signatures, any of
+         which can coincidentally contain a bare "429" substring
+         (RATE_LIMIT_RE's other alternative) purely by chance -- confirmed
+         live against a real, fully successful run that still "matched".
+    Scoping the check to only the SHORT, structured places a genuine
+    rejection can actually appear -- stderr (CLI-level, never packed with
+    incidental noise the way the JSONL stream is) and the terminal `result`
+    event's own api_error_status/result/subtype fields -- keeps the same
+    detection intent without either false-positive class.
+    """
+    try:
+        stderr_text = Path(str(out_path) + ".stderr").read_text(errors="replace")
+    except Exception:
+        stderr_text = ""
+    if RATE_LIMIT_RE.search(stderr_text):
+        return True
+    ev = _stream_result_event(_read_jsonl_events(out_path))
+    if not ev:
+        return False
+    focused = " ".join(str(ev.get(k, "")) for k in ("api_error_status", "result", "subtype"))
+    return bool(RATE_LIMIT_RE.search(focused))
+
+
+def _tmux_capture(session_name):
+    cp = subprocess.run(["tmux", "capture-pane", "-t", session_name, "-p"], capture_output=True, text=True)
+    return cp.stdout if cp.returncode == 0 else ""
+
+
+def _team_idle_block_lines(transcript_text):
+    """Genuine idle_gate.py block turns only -- deliberately NOT a naive
+    substring grep for e.g. "Busy-presence check", which false-positived at
+    design time (the teammate incidentally `cat`-ing hooks/idle_gate.py's own
+    source, whose module docstring literally contains that same phrase, as
+    quoted evidence in its OWN comments). A genuine block is structurally
+    distinct and unambiguous: a "user"-role transcript line whose message
+    content is a bare STRING (never a tool_result block list) starting with
+    the exact injected label "TeammateIdle hook feedback:" -- only the
+    harness's own hook-delivery mechanism ever produces that exact shape."""
+    out = []
+    for line in transcript_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        if d.get("type") != "user":
+            continue
+        content = (d.get("message") or {}).get("content")
+        if isinstance(content, str) and content.startswith("TeammateIdle hook feedback:"):
+            out.append(content)
+    return out
+
+
+def test_a9():
+    """A9 -- idle-gate e2e. hooks/idle_gate.py only ever fires inside a
+    genuine Claude Code "team" (a `~/.claude/teams/session-*/config.json`
+    structure) -- live-confirmed at design time that a plain background
+    Agent-tool spawn or a root `claude --bg` session never fires TeammateIdle
+    at all (see hooks/README.md's prior "UNPROBED" note, which this test
+    supersedes with a real, live, permanent pass/fail). The only way to form
+    a real team is a genuinely interactive (non `-p`) session that spawns a
+    NAMED + backgrounded teammate -- so this test drives one via a detached
+    `tmux` pane (send-keys in, capture-pane / on-disk transcripts out),
+    exactly the technique docs/test-matrix.md's own Gaps section named as
+    future work for the analogous interactive-TTY busy-presence case.
+
+    A seeded "still active" registry row (`a9-seed`) -- NOT the real
+    teammate's own status, which resolves to "stopped" within seconds once it
+    writes its one marker file -- is what gives this test a stable,
+    deliberately-held window: it lets the test catch a real block, then
+    resolve it on purpose (`rest_ok:true`) and confirm the teammate settles
+    cleanly afterward, mirroring how A10 leans on the real ~90s child's own
+    natural lifetime for the same "catch it active, then watch it resolve"
+    shape.
+
+    PASS requires ALL of: (1) the named teammate did real work (its marker
+    file exists) -- proves team formation + a genuine dispatched teammate,
+    not a stub; (2) its OWN per-agent transcript contains a structurally
+    genuine "TeammateIdle hook feedback:" turn (see _team_idle_block_lines)
+    citing the seeded `a9-seed` row by name -- proves idle_gate.py fired and
+    blocked FOR THIS TEAMMATE specifically, while a9-seed was genuinely still
+    "active" (it never resolves on its own); (3) after setting `rest_ok:true`
+    (the documented escape hatch), the teammate's own registry row settles to
+    status "stopped" with no ADDITIONAL block turn appended -- proves the
+    gate does not just block forever, it correctly stands down once the
+    outstanding condition is genuinely resolved.
+    """
+    tid = "A9"
+    if shutil.which("tmux") is None:
+        record(tid, "SKIP", "tmux not available on this host -- A9 requires a real interactive team session")
+        return
+    ws = Path(f"{BASE}-a9")
+    shutil.rmtree(ws, ignore_errors=True)
+    ws.mkdir(parents=True, exist_ok=True)
+    marker = ws / "a9-marker.txt"
+
+    sid = str(uuid.uuid4())
+    project_dir = _project_dir(ws)
+    ddir = project_dir / "delegator"
+    campaign_dir = ddir / sid
+    campaign_dir.mkdir(parents=True, exist_ok=True)
+    (ddir / "sessions.json").write_text(json.dumps({sid: sid}, indent=2))
+    registry_path = campaign_dir / "registry.json"
+    registry_path.write_text(json.dumps({
+        "agents": {
+            "a9-seed": {
+                "agent_id": "a9-seed", "name": "a9-seed", "agent_type": "worker",
+                "status": "active", "purpose": "A9 e2e: deliberately-held outstanding item",
+            }
+        }
+    }, indent=2))
+
+    cj = CLEAN / ".claude.json"
+    try:
+        cj_data = json.loads(cj.read_text())
+    except Exception:
+        cj_data = {}
+    cj_data.setdefault("projects", {}).setdefault(str(ws), {})["hasTrustDialogAccepted"] = True
+    cj.write_text(json.dumps(cj_data))
+
+    teams_dir = CLEAN / ".claude" / "teams"
+    teams_before = set(p.name for p in teams_dir.glob("session-*")) if teams_dir.is_dir() else set()
+
+    session_name = f"delegator-a9-{USER}-{STAMP}"
+    subprocess.run(["tmux", "kill-session", "-t", session_name], capture_output=True)
+    launched = subprocess.run([
+        "tmux", "new-session", "-d", "-s", session_name, "-x", "220", "-y", "50", "-c", str(ws),
+        f"HOME={CLEAN} claude --session-id {sid} --permission-mode bypassPermissions --model sonnet",
+    ])
+    if launched.returncode != 0:
+        record(tid, "FAIL", "tmux new-session failed to launch the interactive team-lead")
+        return
+
+    try:
+        # One-time "Bypass Permissions mode" confirmation dialog -- poll for it
+        # rather than a blind sleep (this cleanroom-equivalent HOME is fresh
+        # every run, so it always appears once).
+        dialog_deadline = time.time() + 20
+        while time.time() < dialog_deadline and "Yes, I accept" not in _tmux_capture(session_name):
+            time.sleep(1)
+        subprocess.run(["tmux", "send-keys", "-t", session_name, "2"])
+        time.sleep(1)
+        subprocess.run(["tmux", "send-keys", "-t", session_name, "Enter"])
+        ready_deadline = time.time() + 20
+        while time.time() < ready_deadline and "bypass permissions on" not in _tmux_capture(session_name).lower():
+            time.sleep(1)
+
+        child_prompt = (
+            "Use the Write tool to write the single word HELLO into the file ./a9-marker.txt in "
+            "your working directory, then stop. Do not do anything else, do not ask questions, "
+            "do not wait."
+        )
+        lead_prompt = (
+            'Use the Agent tool to spawn exactly ONE teammate right now: name="a9-teammate", '
+            'subagent_type="general-purpose", run this in the background (do not wait for it '
+            f'synchronously), description="a9 e2e worker", prompt of the child = "{child_prompt}" '
+            "After you spawn it, do not take any further action yourself -- no more tool calls, no "
+            "more commentary. Just spawn it once and then stop responding."
+        )
+        subprocess.run(["tmux", "send-keys", "-t", session_name, "-l", lead_prompt])
+        time.sleep(1)
+        subprocess.run(["tmux", "send-keys", "-t", session_name, "Enter"])
+
+        subagents_dir = project_dir / sid / "subagents"
+        deadline = time.time() + 90
+        teammate_transcript = None
+        block_lines = []
+        while time.time() < deadline:
+            if teammate_transcript is None and subagents_dir.is_dir():
+                found = list(subagents_dir.glob("agent-*.jsonl"))
+                if found:
+                    teammate_transcript = found[0]
+            if teammate_transcript and teammate_transcript.is_file():
+                block_lines = _team_idle_block_lines(teammate_transcript.read_text(errors="replace"))
+            if marker.is_file() and block_lines:
+                break
+            time.sleep(2)
+
+        reasons = []
+        if not marker.is_file():
+            reasons.append(f"a9-marker.txt never appeared under {ws} -- the named teammate never did its real work")
+        if teammate_transcript is None:
+            reasons.append(f"no per-agent teammate transcript ever appeared under {subagents_dir} -- team formation may have failed")
+        elif not block_lines:
+            reasons.append(f"no genuine 'TeammateIdle hook feedback' turn ever appeared in {teammate_transcript} -- idle_gate.py's block was never observed reaching the teammate")
+        elif "a9-seed" not in block_lines[0]:
+            reasons.append(f"a TeammateIdle block fired but did not cite the seeded a9-seed row: {block_lines[0][:300]!r}")
+
+        if reasons:
+            record(tid, "FAIL", "; ".join(reasons))
+            return
+
+        first_block = block_lines[0]
+        pre_block_count = len(block_lines)
+
+        # Resolve the seeded outstanding item (the documented escape hatch a
+        # real delegator sets once it has confirmed the item itself) and
+        # confirm the teammate settles to a real, clean idle afterward -- no
+        # further block -- within a second bounded window.
+        reg = json.loads(registry_path.read_text())
+        reg["rest_ok"] = True
+        registry_path.write_text(json.dumps(reg, indent=2))
+
+        settle_deadline = time.time() + 60
+        final_status = None
+        while time.time() < settle_deadline:
+            time.sleep(3)
+            try:
+                reg_now = json.loads(registry_path.read_text())
+            except Exception:
+                reg_now = {}
+            agents_now = reg_now.get("agents", {})
+            teammate_row = next(
+                (v for v in agents_now.values() if isinstance(v, dict) and v.get("name") == "a9-teammate"),
+                None,
+            )
+            if teammate_row and teammate_row.get("status") == "stopped":
+                final_status = "stopped"
+                break
+
+        block_lines_after = _team_idle_block_lines(teammate_transcript.read_text(errors="replace"))
+        no_new_block = len(block_lines_after) <= pre_block_count
+        teams_after = set(p.name for p in teams_dir.glob("session-*")) if teams_dir.is_dir() else set()
+        new_teams = teams_after - teams_before
+
+        if final_status != "stopped" or not no_new_block:
+            record(tid, "FAIL",
+                   f"after rest_ok:true, teammate did not settle cleanly -- final_status={final_status}, "
+                   f"block_count before={pre_block_count} after={len(block_lines_after)}")
+            return
+
+        record(tid, "PASS",
+               f"genuine team formed ({', '.join(sorted(new_teams)) or 'pre-existing dir'} under "
+               f"{teams_dir}); named backgrounded teammate did real work (a9-marker.txt written); "
+               f"idle_gate.py's FIRST TeammateIdle block reached it verbatim ({first_block[:180]!r}); "
+               f"after rest_ok:true it settled to registry status=stopped with no further block "
+               f"(transcript: {teammate_transcript})")
+    finally:
+        subprocess.run(["tmux", "send-keys", "-t", session_name, "-l", "/exit"], capture_output=True)
+        time.sleep(1)
+        subprocess.run(["tmux", "send-keys", "-t", session_name, "Enter"], capture_output=True)
+        time.sleep(2)
+        subprocess.run(["tmux", "kill-session", "-t", session_name], capture_output=True)
+
+
+# A10 recycles A8-a's nonce+sentinel technique (PROMPT_A8_A_TMPL) near-
+# verbatim, with changes found necessary by live design-time calibration
+# (four real runs, all evidence kept -- see CHANGELOG/build notes) after the
+# two more "natural-phrasing" attempts below both independently failed to
+# reliably exercise the gate, for two DIFFERENT reasons:
+#
+# Attempt 1 (A8-a's own wording, unchanged): "spawn a worker... wait for it to
+# actually finish... do not conclude until...". Result: the delegator ran a
+# single in-turn bounded-wait Bash call (`timeout N bash -c 'until grep...'`)
+# that blocks until the child is already done -- its own turn only concludes
+# AFTER completion, so stop_gate.py never gets anything real to block.
+#
+# Attempt 2: softened to "check back periodically rather than blocking
+# synchronously". Result, run A: the delegator STILL chose one single
+# in-turn bounded wait anyway (same non-trigger as attempt 1 -- "check back
+# periodically" and "one bounded poll" read as equivalent to the model).
+# Result, run B (unscoped worker, matching A8-a's "spawn a worker... wait for
+# it" verbatim): a real but WRONG-LAYER catch -- the WORKER ITSELF ended its
+# own turn prematurely, and the delegator's charter caught and revived it via
+# SendMessage. Genuinely correct behavior, but on the SubagentStop path
+# (still unwired/P3, see docs/architecture-v2.md) -- stop_gate.py's own
+# Stop-event gate on the TOP-LEVEL session was never touched at all. That
+# run's transcript had no Stop block anywhere despite a real ack-then-wait
+# catch happening -- exactly the false-comfort case this test exists to rule
+# out, just one layer removed.
+#
+# Attempt 3: kept the worker deliberately narrow ("dispatch only, report
+# back immediately") AND forced the top-level delegator's own interim reply.
+# This DID reliably produce the interim reply and a clean Stop-hook pass --
+# but "clean pass" is exactly the problem: campaign_has_outstanding_work()
+# only sees AGENT rows (SubagentStart/Stop-derived), never a raw backgrounded
+# Bash task's own separate lifecycle. Narrowing the worker's job means it
+# calls SubagentStop (registry status -> "stopped") within seconds of
+# dispatch -- long before the real 90s sleep it kicked off has actually
+# finished -- so by the time the top-level Stop event fires, the registry
+# ALREADY shows nothing active. stop_gate.py's clean pass on that run was
+# CORRECT given its inputs, not a bug -- but the scenario itself no longer
+# had genuine outstanding work at the moment that mattered. This is a real,
+# separate finding worth recording: a raw `run_in_background` Bash task, on
+# its own, is invisible to campaign_has_outstanding_work() -- only an AGENT
+# (worker/orchestrator) row registers as "active" work.
+#
+# This final version keeps what each of the three prior attempts got right
+# and drops what didn't work: the worker's job is the FULL A8-a-style
+# "run it and wait for it to actually finish" (so its OWN registry row stays
+# genuinely "active" for the real ~90s, exactly like the very first
+# calibration run that DID produce a clean block), combined with attempt 3's
+# deterministic forcing of the top-level delegator's own interim,
+# tool-call-free status reply immediately after dispatch -- BEFORE the
+# worker's own reply, while it is still genuinely active. This is not an
+# instruction to misbehave or fabricate anything -- the interim reply is
+# honest ("worker dispatched, I'll check back"), never claims completion,
+# and the delegator must still produce the REAL final nonce afterward -- it
+# is fault-injection in the same spirit as this whole test: deliberately
+# construct the exact condition (a live child + an end-of-turn attempt) the
+# gate exists to intercept, then verify it actually does.
+# Attempt 4 (the version just above, superseded): produced exactly the
+# needed precondition -- a genuine top-level Stop block while the worker was
+# still verifiably active -- on its very first live run. But the delegator's
+# OWN reaction to being blocked was to set the campaign's `rest_ok:true`
+# escape hatch itself ("confirmed the worker is legitimately waiting on the
+# real 90s sleep, not stalled"), then give ANOTHER interim reply and
+# conclude -- technically a defensible reading of rest_ok's own documented
+# semantics ("a legitimate long rest"), but it meant the `-p` process ended
+# WITHOUT ever actually collecting the real nonce. A genuine, separate
+# finding (the rest_ok escape hatch and the HEADLESS END-OF-TURN RULE can
+# interact badly: rest_ok correctly silences the MECHANICAL gate, but nothing
+# stops the process from still ending its own turn while genuinely owing a
+# deliverable in one-shot mode -- there is no external "wake the resting
+# session back up" mechanism for the TOP-LEVEL session the way SendMessage
+# revives a child). This final version adds one closing instruction that
+# closes that specific loophole without touching anything else that already
+# worked: being blocked is the CORRECT, expected outcome here, not something
+# to resolve away -- just continue past it and keep genuinely waiting.
+PROMPT_A10_TMPL = (
+    "Task: spawn a worker to run this exact Bash command via the Bash tool, verbatim, no "
+    "modification: `sleep 90 && echo 'RESULT: SLOW-OK {nonce}'`, and have THAT WORKER wait for "
+    "it to actually finish before it reports back to you -- the worker itself must not stop "
+    "early. Separately: do NOT wait for the worker's own reply before giving YOUR OWN first "
+    "reply -- immediately after you have spawned it, give a short ONE-LINE status update as "
+    "your answer for THIS turn (something like 'Worker dispatched, will check back shortly') "
+    "and make NO further tool call in that same reply -- no bounded wait, no poll, no Monitor "
+    "call yet; just that one honest status line and stop there. You will get further turns "
+    "afterward to actually collect the worker's real result and give your final answer -- do "
+    "not fabricate or guess it before then. If your busy-presence check ever reports the worker "
+    "as still active, that is CORRECT and EXPECTED (it really is still running) -- do not set "
+    "rest_ok:true or otherwise short-circuit the check to make it go away; simply continue "
+    "waiting for the worker's genuine completion. Route per your rules and execute fully. Your "
+    "LAST reply overall (once you actually have the worker's real completion in hand) must end "
+    "with EXACTLY one final line, nothing after it: FINAL-NONCE: <the worker's exact RESULT "
+    "line, verbatim>."
+)
+
+
+def find_first_stop_block(events):
+    """First (index, event) where a Stop hook_response's own output carries
+    stop_gate.py's real {"decision": "block", ...} payload -- NOT just the
+    hook firing (a clean, non-blocking pass ALSO has hook_name=="Stop", just
+    with empty output/exit_code 0). `events` is in true chronological stream
+    order (see _read_jsonl_events), so the returned index directly encodes
+    "when" without needing any wall-clock field."""
+    for i, d in enumerate(events):
+        if d.get("type") == "system" and d.get("subtype") == "hook_response" and d.get("hook_name") == "Stop":
+            out = d.get("output") or d.get("stdout") or ""
+            if re.search(r'"decision"\s*:\s*"block"', out):
+                return i, d
+    return None, None
+
+
+def find_child_task_bounds(events, needle):
+    """Locate the CHILD's own real backgrounded task via a STRUCTURAL link,
+    not a text-matching heuristic: find every Bash tool_use whose own
+    `input.command` contains `needle` (this run's unique nonce baked into the
+    literal command, so it can never be confused with the delegator's own
+    separate bounded-wait/grep task, which mentions the same nonce in a
+    differently-shaped command), then find the first of those tool_use ids
+    that has a matching `task_started.tool_use_id` (there can be more than
+    one candidate tool_use -- e.g. the worker retrying with
+    `run_in_background: true` added after the Bash tool's own guardrail
+    against a standalone chained `sleep && echo` rejected the first attempt,
+    live-observed during this test's own build -- the first one that
+    actually started a real task is the right one). Returns (start_idx,
+    task_id, done_idx); any may be None if not found.
+
+    Deliberately NOT a match against task_started's own `description` field
+    (an earlier version of this function did that, and was wrong): a real
+    bug caught live during this test's own build -- `description` is a
+    free-text natural-language summary the MODEL writes for the Bash call
+    (e.g. "Sleep 90 seconds then print result line"), not guaranteed to
+    contain the literal command text at all, especially once the guardrail
+    above forces a rephrased/backgrounded retry."""
+    tool_use_ids = []
+    for d in events:
+        if d.get("type") != "assistant":
+            continue
+        for c in (d.get("message") or {}).get("content", []):
+            if isinstance(c, dict) and c.get("type") == "tool_use" and c.get("name") == "Bash":
+                if needle in ((c.get("input") or {}).get("command") or ""):
+                    tool_use_ids.append(c.get("id"))
+
+    start_idx, task_id = None, None
+    for tuid in tool_use_ids:
+        for i, d in enumerate(events):
+            if d.get("subtype") == "task_started" and d.get("tool_use_id") == tuid:
+                start_idx, task_id = i, d.get("task_id")
+                break
+        if task_id is not None:
+            break
+    if task_id is None:
+        return None, None, None
+
+    done_idx = None
+    TERMINAL = ("completed", "killed", "stopped")
+    for i, d in enumerate(events):
+        if i <= start_idx or d.get("task_id") != task_id:
+            continue
+        if d.get("subtype") == "task_updated" and (d.get("patch") or {}).get("status") in TERMINAL:
+            # "killed"/"stopped" (not just "completed") are real, observed
+            # terminal states here too: once the top-level `-p` process
+            # itself concludes, the harness force-kills any STILL-RUNNING
+            # backgrounded Bash job as part of process cleanup, even when the
+            # real underlying command had already finished and been read
+            # moments earlier (live-observed during this test's own build --
+            # the delegator's own final answer correctly carried the real
+            # nonce on a run whose task bookkeeping showed "killed", not
+            # "completed"). Any of the three still marks "this task's
+            # tracked lifecycle is over" for ordering purposes.
+            done_idx = i
+            break
+        if d.get("subtype") == "task_notification" and d.get("status") in TERMINAL:
+            done_idx = i
+            break
+    return start_idx, task_id, done_idx
+
+
+def find_worker_active_bounds(events):
+    """The worker AGENT's own active window (first SubagentStart -> the next
+    SubagentStop), matching EXACTLY what campaign_has_outstanding_work()
+    itself inspects (registry `status`, derived from these same two event
+    types by hooks/ledger.py's fold_registry()) -- deliberately NOT the raw
+    backgrounded Bash task's own separate lifecycle (find_child_task_bounds
+    above): a real ordering bug caught live during this test's own build --
+    the Bash tool's own guardrail against a standalone chained
+    `sleep && echo` can reject the worker's FIRST attempt outright (no
+    task_started at all for it), forcing a retry with `run_in_background:
+    true` added, whose OWN task_started can land AFTER a Stop block that
+    already correctly saw the WORKER AGENT as active during that failed
+    first attempt -- i.e. genuinely before the child's real work had even
+    successfully started being tracked, which a naive task-bookkeeping-only
+    ordering check would wrongly read as "block came before start". The
+    agent's own SubagentStart/Stop window has no such gap: it opens the
+    moment the Agent tool dispatches the worker (before ANY of its own Bash
+    attempts, successful or not) and closes only when the worker genuinely
+    reports back. This is the PRIMARY ordering anchor test_a10 grades on;
+    find_child_task_bounds is kept as secondary, informational corroboration
+    (confirms the real child command's own bookkeeping when it's cleanly
+    available) but never gates PASS/FAIL on its own. Returns (start_idx,
+    done_idx); either may be None if not found."""
+    start_idx = None
+    for i, d in enumerate(events):
+        if d.get("hook_event") == "SubagentStart":
+            start_idx = i
+            break
+    if start_idx is None:
+        return None, None
+    done_idx = None
+    for i, d in enumerate(events):
+        if i <= start_idx:
+            continue
+        if d.get("hook_event") == "SubagentStop":
+            done_idx = i
+            break
+    return start_idx, done_idx
+
+
+def test_a10():
+    """A10 -- stop-gate e2e. Proves hooks/stop_gate.py itself is load-bearing,
+    not merely "a delegator with good charter discipline happens to pass
+    anyway": captures raw --include-hook-events telemetry and requires a REAL
+    Stop-hook block decision landing strictly within the worker AGENT's own
+    active window (SubagentStart -> SubagentStop -- the exact same signal
+    campaign_has_outstanding_work() itself inspects via the registry, never
+    something the model's own final-answer prose could fabricate or narrate
+    around).
+
+    PASS requires ALL of: (1) the run's unique nonce appears in the
+    delegator's OWN final result text (proves the process did not exit
+    before the real ~90s child actually finished -- same load-bearing
+    structural fact A8-a's nonce anchor rests on); (2) at least one Stop
+    hook_response in the raw stream carries a genuine `{"decision":"block"}`
+    payload (proves stop_gate.py did real, positive work -- not merely that
+    it fired and passed cleanly, which a clean run also shows); (3) that
+    block's own position in the stream falls strictly within the worker
+    agent's own SubagentStart..SubagentStop window (proves the block
+    happened WHILE the registry genuinely showed it active, not after the
+    fact once it had already stopped, which would be no evidence at all that
+    anything was actually intercepted). The child's own raw Bash task
+    bookkeeping (find_child_task_bounds) is logged as secondary,
+    corroborating evidence when cleanly available, but never gates PASS/FAIL
+    on its own -- see that function's docstring for a real ordering edge
+    case (a guardrail-forced retry) that made it an unreliable PRIMARY
+    anchor.
+    """
+    tid = "A10"
+    # Retry-on-rate-limit here mints a BRAND-NEW campaign (sid + nonce) per
+    # attempt, unlike run_with_retry_json's shared "retry the exact same cmd"
+    # contract -- confirmed live (design-time integration run) that reusing
+    # one --session-id across two separate non-resumed `claude -p` calls is
+    # rejected outright ("Error: Session ID <uuid> is already in use"), which
+    # a same-cmd retry WOULD attempt the moment the first attempt's rate-limit
+    # happens after the session was already persisted to disk (a real risk
+    # here specifically, since this run spans a genuine ~90s background task,
+    # unlike this suite's other short -p calls where a rate limit typically
+    # lands before any session file exists at all).
+    ok = False
+    nonce = None
+    out = None
+    for attempt in (1, 2):
+        sid, campaign_dir = mint_campaign(WORK)
+        nonce = f"NONCE-{uuid.uuid4().hex[:12]}"
+        prompt = PROMPT_A10_TMPL.format(nonce=nonce)
+        out = LOGDIR / f"a10-stream-attempt{attempt}.jsonl"
+        cmd = claude_cmd("--agent", "delegator", "--session-id", sid,
+                          "--output-format", "stream-json", "--include-hook-events", "--verbose",
+                          prompt)
+        # Generous but bounded outer cap -- past the child's own real ~90s plus
+        # thinking/tool overhead, so a genuinely broken (hung) run can't stall
+        # the whole suite (same idea as A8-a's 240s cap for the same 90s shape).
+        ok = _run_stream_json_once(out, cmd, cwd=str(WORK), timeout=300)
+        if ok:
+            break
+        if _a10_is_rate_limited(out):
+            if attempt >= 2:
+                record(tid, "SKIPPED-LIMIT", f"rate-limited twice; last nonce={nonce}; {out}")
+                return
+            say(f"  A10 rate-limited (attempt {attempt}) — retrying in 10s with a fresh session...")
+            time.sleep(10)
+            continue
+        break
+    if not ok:
+        record(tid, "FAIL", f"claude -p failed or exceeded the 300s outer timeout; nonce={nonce}; see {out}")
+        return
+    child_cmd = f"sleep 90 && echo 'RESULT: SLOW-OK {nonce}'"
+
+    events = _read_jsonl_events(out)
+    result_ev = _stream_result_event(events)
+    result_text_ = (result_ev or {}).get("result") or ""
+    sentinel = last_sentinel(result_text_, "FINAL-NONCE")
+
+    reasons = []
+    if nonce not in result_text_:
+        reasons.append(f"nonce {nonce} not found in the delegator's final result text -- see {out}")
+
+    block_idx, block_ev = find_first_stop_block(events)
+    agent_start_idx, agent_done_idx = find_worker_active_bounds(events)
+    # Secondary, informational-only corroboration -- the real child command's
+    # own bash-level bookkeeping, when cleanly available. Logged for
+    # transparency but never gates PASS/FAIL (see find_child_task_bounds's
+    # own docstring for the ordering edge case that ruled it out as primary).
+    task_start_idx, task_id, task_done_idx = find_child_task_bounds(events, child_cmd)
+
+    if block_idx is None:
+        reasons.append("no Stop-hook BLOCK decision found anywhere in the raw hook telemetry -- "
+                        "stop_gate.py was never exercised on this run (see this test's docstring: "
+                        "this is the exact ambiguity it exists to catch, not something to paper over)")
+    if agent_start_idx is None or agent_done_idx is None:
+        reasons.append(f"could not locate the worker agent's own SubagentStart/SubagentStop window in "
+                        f"the stream (agent_start_idx={agent_start_idx} agent_done_idx={agent_done_idx})")
+
+    if not reasons and not (agent_start_idx < block_idx < agent_done_idx):
+        reasons.append(f"Stop-block at stream idx {block_idx} does not fall strictly within the worker "
+                        f"agent's own active window (SubagentStart idx {agent_start_idx} .. SubagentStop "
+                        f"idx {agent_done_idx}) -- not proof the block happened while the registry "
+                        f"genuinely showed it active")
+
+    if reasons:
+        record(tid, "FAIL", "; ".join(reasons))
+        return
+
+    reason_m = re.search(r'"reason"\s*:\s*"([^"]*)"', (block_ev.get("output") or block_ev.get("stdout") or ""))
+    task_note = (f"; child bash task_id={task_id} own bookkeeping idx {task_start_idx}..{task_done_idx} "
+                 f"(informational only)" if task_id else "; child's own raw bash task bookkeeping not "
+                 f"cleanly isolated this run (informational only, does not affect this PASS)")
+    record(tid, "PASS",
+           f"nonce={nonce} present in final result (sentinel='{sentinel}'); real Stop-hook BLOCK at "
+           f"stream idx {block_idx} (reason: {(reason_m.group(1)[:150] if reason_m else '?')}) fell "
+           f"strictly within the worker agent's own active window (SubagentStart idx {agent_start_idx} "
+           f".. SubagentStop idx {agent_done_idx}) -- the gate genuinely intercepted a premature "
+           f"end-of-turn attempt while the registry showed the child still active, not after the fact"
+           f"{task_note}; raw stream: {out}")
+
+
 def test_a7_t6():
     tid = "A7-t6"
     ws = Path(f"{BASE}-t6")
@@ -1237,9 +1913,12 @@ def main():
     # supersede charter-discipline polling as busy-presence enforcement, making
     # A8's "does the model choose to comply" test moot. Functions + prompt
     # templates/regexes left defined below, uncalled -- explicitly kept on disk
-    # for A10 (stop-gate e2e) to recycle rather than rebuild from scratch.
+    # since A10 (stop-gate e2e) recycles PROMPT_A8_A_TMPL's nonce+sentinel
+    # technique rather than rebuilding it from scratch.
     # test_a8_a()
     # test_a8_b()
+    test_a9()
+    test_a10()
     if args.full:
         test_a7_t6()
         test_a7_t7()

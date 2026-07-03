@@ -384,3 +384,87 @@ avoid breaking anyone already relying on it):
 
 Backoff/re-fire scheduling and a `Monitor`-native version remain out of scope
 (see roadmap N2 "why now" — the scripts are intentionally small).
+
+## Mechanical busy-presence gates (`stop_gate.py` / `idle_gate.py`, GATES v2 v1.4.0)
+
+Where `watchdog.py` above only *alerts* (injects a STALE_AGENT line the model can
+still choose to ignore), these two hooks *block* — they replace charter-discipline
+polling (`agents/delegator.md`'s Forward-pressure section) with a mechanical gate
+that doesn't depend on model compliance at all. Both are thin wrappers around one
+shared check, `hooks/ledger.py`'s `campaign_has_outstanding_work(campaign_dir)`:
+`(True, reason)` if any registered agent in that campaign's `registry.json` has a
+`status` not in `stopped`/`retired`/`died`, or there's an unanswered-gate condition
+(reusing `watchdog.py`'s own `check_unanswered_gates()`) — **unless** the registry's
+top-level `rest_ok` is exactly `true`, an explicit escape hatch only a delegator
+itself ever sets, as its own informed judgment call that a mechanical read is stale.
+
+**Trigger events, and why each needs its own script despite sharing all the logic
+above:**
+
+- **`stop_gate.py` — `Stop`.** Fires when the calling session's own turn tries to
+  end. Live-proven, but via a hand-driven calibration probe that predates and
+  informed `testbed/run_all.py`'s `test_a10` (not a passing run of `test_a10`
+  itself, which has not yet achieved a clean pass as of v1.4.0 — see
+  `docs/test-matrix.md` and the CHANGELOG for the honest accounting): raw
+  `--include-hook-events` telemetry showed a real ~90s backgrounded child's own
+  harness-tracked bookkeeping cross-referenced against genuine repeated blocks,
+  forcing the turn to continue rather than let the process exit — the reason
+  text is delivered as a synthetic **user** turn, `"Stop hook feedback:\n<reason>"`.
+- **`idle_gate.py` — `TeammateIdle`.** Fires when a named, backgrounded teammate
+  inside a genuine Claude Code **team** is about to go idle. Live-proven with a
+  clean, real PASS of `test_a9` itself (see `docs/test-matrix.md`) to
+  force-continue that teammate specifically.
+
+**Delivery-schema difference is real, not an oversight** — the two events simply
+don't share a delivery mechanism:
+
+| | `stop_gate.py` (`Stop`) | `idle_gate.py` (`TeammateIdle`) |
+|---|---|---|
+| Blocks via | `stdout`: `{"decision": "block", "reason": "..."}` | exit code `2` + `stderr` text |
+| Delivered to the model as | `"Stop hook feedback:\n<reason>"` | `"TeammateIdle hook feedback:\n[<hook command>]: <stdout+stderr>"` |
+| stdout/stderr discipline | stdout carries the JSON payload; **stderr must stay permanently empty** — even one unrelated stray warning line surfaces to the user as a "Stop hook error" UI notification, live-confirmed, even when the block itself still works | stderr **is** the load-bearing channel here — the one hook in this repo that deliberately writes to it |
+| Exit code | always `0` (irrelevant to blocking for `Stop` — the decision lives in the JSON payload) | `2` when blocking, `0` otherwise |
+
+**"Phrase the reason as fact, not a command"** — both scripts word their reason as
+"here's what the registry shows", never as an imperative ("you MUST..."). This is a
+deliberate design choice, not a style preference: live-probed (`P2`, `SubagentStop`)
+that when injected hook feedback reads as a bare command, the model recognizes it as
+looking like an untrusted prompt-injection attempt and explicitly **refuses to
+comply with the specific instruction** — even though the block mechanism itself
+still works (the turn still continues) regardless of phrasing. Stating the
+registry's condition as observed fact, then naming the charter's own legitimate next
+moves as options (continue / `SendMessage` the spawner if genuinely waiting /
+report with the `RESULT` sentinel if done), reads as trusted state rather than an
+injected order — this is what both scripts' exact wording implements.
+
+**Team formation is the load-bearing precondition for `TeammateIdle` to fire at
+all** — superseding this file's own earlier "UNPROBED" note above: a plain
+background `Agent`-tool spawn or a root `claude --bg` session never fires this
+event (confirmed live, both negative). Only a genuinely **interactive** (non `-p`)
+session that spawns a NAMED + backgrounded teammate — which promotes that session
+into a `~/.claude/teams/session-*/config.json` team-lead — does. `test_a9` drives
+this for real via a detached `tmux` pane (`send-keys` in, on-disk per-agent
+transcripts out — `<project-dir>/<session-id>/subagents/agent-<id>.jsonl`), rather
+than asserting it only worked once by hand.
+
+**Campaign resolution, the `rest_ok` escape hatch, and the fail-open contract are
+identical to `ledger.py`/`watchdog.py` above** — see `campaign_has_outstanding_work()`'s
+own docstring for the exact rules. Neither gate ever creates a directory or file;
+both are pure reads except for the block decision itself.
+
+Live e2e coverage (beyond the 9-case unit fault-injection of
+`campaign_has_outstanding_work()` and each script's delivery mechanics, which is a
+separate, already-covered layer): `testbed/run_all.py`'s `test_a9` (idle-gate) and
+`test_a10` (stop-gate), both wired into the default set. **As of v1.4.0, `test_a9`
+has a clean, real PASS; `test_a10` has FAILED all 6 recorded attempts (rate
+limits/timeouts, one genuine "gate never exercised" scenario-timing catch, two
+"nonce not found" misses) — the underlying mechanism is separately confirmed by
+a hand-driven probe, not by `test_a10` itself passing. See `docs/test-matrix.md`
+and the CHANGELOG for the full, honest accounting; this needs attention before
+`test_a10` can honestly be called a green permanent regression test.** `test_a10`
+is *designed* to rule out a specific ambiguity — that a passing run might just
+mean "the delegator's own charter discipline happened to behave well," never
+exercising the gate at all — by requiring the raw hook telemetry to show a real
+block decision landing strictly between the child's own start and completion
+bookkeeping, not merely that the run finished correctly; that design intent is
+sound even though the test hasn't yet reliably passed under it.

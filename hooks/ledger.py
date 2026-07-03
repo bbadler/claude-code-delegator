@@ -465,6 +465,79 @@ def resolve_home_session_id(project_dir, session_id):
     return home_id if isinstance(home_id, str) and home_id else None
 
 
+def campaign_has_outstanding_work(campaign_dir):
+    """Shared outstanding-work check for hooks/stop_gate.py and
+    hooks/idle_gate.py (GATES v2, v1.4.0, mechanical busy-presence
+    enforcement) -- ONE source of truth so the two gates can never silently
+    diverge on what counts as "busy", the same drift class that caused the
+    registry shape bugs this module already fixed twice. Returns
+    (outstanding: bool, reason: str or None).
+
+    Respects one explicit escape hatch FIRST: if registry.json's top-level
+    "rest_ok" is exactly True, this always returns (False, None) regardless
+    of any other signal below -- the delegator's own informed judgment (it
+    reached one of its three legitimate end-states: nothing outstanding, a
+    gate that needs the human, or retirement on context -- see
+    agents/delegator.md's Forward pressure section) always overrides a
+    possibly-stale mechanical read. Neither gate script ever writes this
+    field -- only a delegator does, as its own deliberate judgment call.
+
+    Absent that override, outstanding work is ANY of:
+      1. a registered agent whose status is NOT stopped/retired/died (a
+         child is still actively running, per fold_registry()'s own status
+         derivation from events.jsonl);
+      2. an unanswered-gate condition in events.jsonl (reusing
+         hooks/watchdog.py's check_unanswered_gates() via a lazy import --
+         NOT a module-level one: watchdog.py already does `import ledger` at
+         its own top level, so a top-level `import watchdog` here would be a
+         circular import; deferring it to call time, after both modules have
+         long finished loading regardless of which one was the entry point,
+         avoids that entirely).
+
+    Fail-open in every uncertain case (missing/corrupt registry, unrecognized
+    shape, any exception) -- never blocks on uncertainty, only on positive
+    evidence of outstanding work.
+    """
+    registry_path = os.path.join(campaign_dir, "registry.json")
+    if not os.path.isfile(registry_path):
+        return False, None
+    try:
+        with open(registry_path) as f:
+            existing = json.load(f)
+    except Exception:
+        return False, None
+
+    if isinstance(existing, dict) and existing.get("rest_ok") is True:
+        return False, None
+
+    normalized = normalize_existing(existing)
+    if normalized is None:
+        return False, None
+    _, entries_by_agent_id, _, _ = normalized
+
+    active_names = [
+        (e.get("name") or aid)
+        for aid, e in entries_by_agent_id.items()
+        if isinstance(e, dict) and e.get("status") not in ("stopped", "retired", "died")
+    ]
+    reasons = []
+    if active_names:
+        reasons.append(f"still-active agent(s): {', '.join(active_names)}")
+
+    events_path = os.path.join(campaign_dir, "events.jsonl")
+    if os.path.isfile(events_path):
+        import watchdog as _watchdog
+        rows = _watchdog.load_rows(events_path)
+        if rows:
+            gate_lines = _watchdog.check_unanswered_gates(rows)
+            if gate_lines:
+                reasons.append(f"{len(gate_lines)} unanswered gate(s)")
+
+    if not reasons:
+        return False, None
+    return True, "; ".join(reasons)
+
+
 def main():
     raw = sys.stdin.read()
     if not raw.strip():

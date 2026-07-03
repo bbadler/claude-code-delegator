@@ -61,7 +61,20 @@ guaranteed-forever.
 | Isolation (cleanroom: no personal `CLAUDE.md` / auto-memory leak) | A0 | Covered |
 | BMAD adapter (`docs/adapters/bmad.md`) | — | Not exercised — no BMAD-workspace test exists; documentation-only artifact |
 | Roadmap items (T1-T3, N3, X1-X4, L1-L7, M1) | — | N/A for v1.0.0 — unshipped by design (`docs/roadmap-v2.md`), out of scope for this matrix |
-| Busy-presence rule + HEADLESS END-OF-TURN RULE (`agents/delegator.md` Forward-pressure section, v1.3.0/v1.3.1) | A8-a (stay-present-and-collect, nonce-presence proof), A8-b (timeout = suspicion trigger) | Covered (permanent regression pair) — **first live default-set run: A8-a PASS, A8-b FAIL**; independently cold-verified. See `CHANGELOG.md`'s `Unreleased` entry for full evidence: A8-a's pass included genuine skeptical-operator behavior (a coincidental false-positive poll match was NOT trusted; the delegator ground-truthed the real output file before reporting); A8-b's fail was because the worker's `sleep 600` was intercepted by a Bash-tool guardrail in ~2ms (the intended stall never occurred, so conditions requiring a poll-timeout + suspicion action were structurally unmet) rather than dishonest/hung behavior — flagged as a scenario-design gap in A8-b for future refinement. A fully independent, unrelated pre-existing test (A2) failed on the same run with the identical root-cause bug class (a long, otherwise-correct busy-presence session still ending its last turn on an unrecoverable "wait for the harness to re-invoke me" pattern), corroborating that this is a real, systemic, currently-live gap rather than an A8-specific artifact. |
+| Busy-presence rule + HEADLESS END-OF-TURN RULE (`agents/delegator.md` Forward-pressure section, v1.3.0/v1.3.1) | A8-a (stay-present-and-collect, nonce-presence proof), A8-b (timeout = suspicion trigger) | **Built, live-tested, then ABORTED mid-flight by operator order (v1.4.0)** — superseded by the mechanical gates below rather than relying on charter discipline. `test_a8_a`/`test_a8_b` and their prompt templates remain in `testbed/run_all.py`, commented out of the default run, not deleted (A10 below recycles A8-a's nonce+sentinel fixture design). Prior live results kept for the record: first live default-set run showed A8-a PASS, A8-b FAIL (independently cold-verified) — see `CHANGELOG.md`'s `v1.4.0` entry ("A8 (built, then aborted mid-flight...)" subsection) for the full evidence this superseded. |
+| Mechanical idle-gate (`hooks/idle_gate.py`, GATES v2 v1.4.0) — blocks a named teammate's `TeammateIdle` while its campaign has outstanding work | A9 (idle-gate e2e, `testbed/run_all.py`'s real `test_a9()`) | **PASS** — confirmed via a real completed run (`a9-drive.log`): a genuine Claude Code team formed via a detached `tmux`-controlled interactive session (live-confirmed: a plain background Agent-tool spawn / root `claude --bg` never fires `TeammateIdle` at all), the named backgrounded teammate did real work, `idle_gate.py`'s first block reached it citing the seeded `a9-seed` row verbatim, and after the test harness set `rest_ok:true` (standing in for a real human/owning-process confirmation) the teammate settled to `status:"stopped"` with no further block — all 3 conditions the test requires. Separately, an EARLIER design-time hand-probe (different fixture name, `seed-worker`, predating `test_a9()`'s current design) found that a real delegator asked to clear the same kind of row itself correctly refuses to fabricate `rest_ok:true` without genuine verification — informative design history explaining why the harness (not the model) provides that confirmation in the current test, not a result of the PASS above. See `CHANGELOG.md`'s `v1.4.0` entry for both accounts in full. |
+| Mechanical stop-gate (`hooks/stop_gate.py`, GATES v2 v1.4.0) — blocks the delegator's own `Stop` while its campaign has outstanding work | A10 (stop-gate e2e, `testbed/run_all.py`'s real `test_a10()`) | **FAIL across all 6 recorded attempts** (rate limits/timeout, one genuine "`stop_gate.py` never exercised" scenario-timing catch, two "nonce not found" misses) **— a 7th attempt was in flight and intentionally not waited for further** (operator trim order: no relaunching, no babysitting). **The underlying mechanism is separately confirmed working**, though, via an earlier hand-driven calibration probe (predating `test_a10()`'s current design, not a run of the actual test function): real repeated `"Stop hook feedback:\nBusy-presence check: still-active agent(s): <id>..."` blocks (`num_turns: 19` vs. a control run's `2`), followed by the delegator's own final reply containing the correct worker nonce — genuine evidence `stop_gate.py` itself works, but NOT the same claim as "the automated e2e test passes reliably," which it has not, in 6 real tries. Needs attention (test-scenario timing/flakiness, or a genuine remaining gap) before this can honestly be called a green permanent regression test. See `CHANGELOG.md`'s `v1.4.0` entry for the full accounting of all 6 attempts. |
+
+**Trim note (v1.4.0, operator order, applies to both A9 and A10 above)**: GATES v2
+was accepted on "the tool demonstrably works" rather than the full
+suite-regression + cold-verify ceremony used elsewhere in this matrix.
+**Explicitly NOT done and not claimed**: no full default-set regression run with
+`stop_gate.py`/`idle_gate.py` live in the hook chain (A0-A7 were not re-verified
+against the gate-wired hooks), no cold-verifier pass on this task, no additional
+e2e attempts beyond the single runs cited above. Unit fault-injection (9 cases,
+both gates, direct function calls against synthetic registries — no live
+sessions) was run to green as the cheap, fast substitute for that missing
+regression coverage.
 
 ## Known-issue retests (A1, A7-t5)
 
@@ -145,7 +158,9 @@ grading-logic drift between the two runner implementations.
 - **install.sh's `--verify` mechanism itself is coarse**: it only checks that the three
   agent *names* appear in a plain-text listing, not that their descriptions/content match
   what's on disk.
-- **A8 (`test_a8_a`/`test_a8_b` — busy-presence / timeout-suspicion) is `-p`-only; the
+- **A8 (`test_a8_a`/`test_a8_b` — busy-presence / timeout-suspicion, ABORTED
+  mid-flight v1.4.0, kept here as it's still the accurate historical account of why
+  this gap was found and what it looked like) is `-p`-only; the
   interactive-TTY case is NOT covered.** The operator's ORIGINAL field failure that
   motivated `agents/delegator.md`'s Forward-pressure (busy-presence) section was a real
   terminal session where a live delegator rested politely between user turns instead of
@@ -164,4 +179,8 @@ grading-logic drift between the two runner implementations.
   interactive-session test that launches `claude` (not `-p`) inside a `tmux` pane, drives
   it via `tmux send-keys`, and inspects `tmux capture-pane` output over real wall-clock
   time to check whether a live delegator is still actively working (not silently resting)
-  between turns while a child is outstanding.
+  between turns while a child is outstanding. (The `tmux`-driven TECHNIQUE itself has
+  since been built, for a DIFFERENT purpose — A9 uses it to form a real Claude Code team
+  and prove `idle_gate.py` — but this specific charter-discipline-in-an-interactive-session
+  gap is still open; A9 tests the mechanical hook, not whether an unaided delegator stays
+  present on its own.)

@@ -1,2 +1,4 @@
 testbed/.menu-gate-logs/
 hooks/__pycache__/
+
+testbed/__pycache__/
