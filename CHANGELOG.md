@@ -2,6 +2,25 @@
 
 All notable changes to `claude-code-delegator` are documented here.
 
+## v1.3.1 (2026-07-03)
+
+- **BUSY-PRESENCE RULE (operator field report, screenshot evidence)**: a live
+  delegator sat "waiting politely" across multiple turns — ending turns into idle
+  while children owed deliverables, citing discipline rules as reasons for
+  passivity — and instantly decided 8+ pending items the moment the human kicked
+  it. Root cause: the charter allowed turn-ending waits. Fixed: while ANY child
+  owes a deliverable the delegator does not end its turn — it loops advance-check
+  (decide/advance everything decidable, in batch) → bounded in-turn wait (one
+  cheap `timeout … until grep` call per interval) → on timeout, the silence IS
+  the suspicion trigger (ground-truth sweep + classify-nudge). The poll-timeout
+  replaces any need for an external heartbeat. Turns may end only on: milestone
+  complete (report at milestone granularity), a genuinely-human gate, or
+  retirement. The headless end-of-turn rule is thereby generalized to every mode.
+- **NO-RELAY ≠ NO-LOOK**: the no-relay rule forbids forwarding a grandchild's
+  results around its parent — it never forbids the delegator READING completed
+  outputs that feed its own decisions; the live session had misread it as
+  look-prohibition.
+
 ## v1.3.0 (2026-07-03)
 
 ### Proactive watchdog: automatic STALE_AGENT alerts (github issue #1)
