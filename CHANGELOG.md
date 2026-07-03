@@ -2,6 +2,79 @@
 
 All notable changes to `claude-code-delegator` are documented here.
 
+## Unreleased
+
+- **A8 — permanent regression pair for the busy-presence rule (`agents/delegator.md`'s
+  Forward-pressure section) and the HEADLESS END-OF-TURN RULE it generalizes**
+  (`testbed/run_all.py`: `test_a8_a`/`test_a8_b`, wired into the default set immediately
+  after `test_a7_t5()`). Two new, permanent live `claude -p --agent delegator` tests —
+  every future default `./run_all.py` run now exercises this rule mechanically, not just
+  once by hand.
+  - **A8-a (stay-present-and-collect)** briefs the delegator to spawn one worker running
+    a genuinely slow (~90s) `sleep 90 && echo 'RESULT: SLOW-OK <nonce>'` and relay the
+    exact RESULT line. The nonce is a fresh `uuid4` minted every run — never hardcoded —
+    so there is no ambiguity about coincidence. **PASS is anchored on one load-bearing,
+    structural fact**: that nonce, only ever emitted by the worker ~90+ real seconds into
+    the run, showing up in the delegator's OWN final `-p` result text. Per the HEADLESS
+    END-OF-TURN RULE, a `-p` process's final turn (a response with no further tool call)
+    ends the process outright — there is no "turn ends but the process lingers" state —
+    so that nonce cannot reach the final answer unless the process was genuinely still
+    alive, polling/waiting, when the worker finished. Mechanism evidence (which polling
+    idiom actually fired — the charter's own `timeout N bash -c 'until grep...'`,
+    `Monitor`, or the harness-native `ScheduleWakeup`) is gathered from the raw session
+    transcript for transparency only and never overrides a clean nonce-presence PASS.
+  - **A8-b (timeout = suspicion trigger)** — same shape, but the worker's command
+    (`sleep 600`) is meant to stall with no result ever emitted; the delegator's brief
+    bakes in only a soft "~2 minutes" expectation, never instructions on how to detect or
+    react to a stall (that reaction is exactly what's under test). PASS requires
+    transcript evidence of (1) a bounded-wait poll actually reaching its own deadline
+    without a match, (2) a ground-truth check or SendMessage classify-nudge following
+    that timeout, and (3) an honest final report — acknowledging non-delivery, not
+    claiming success, and not making a forward-looking "I will keep monitoring / wait for
+    its completion notification" promise a process that has already ended can never
+    keep (that last clause was added after a live diagnostic run produced exactly that
+    phrasing and a naive keyword check would have misgraded it as honest).
+  - **Live findings (first real runs against the current charter, not hypothetical —
+    full transcripts retained, independently cold-verified, see below)**: on the
+    recorded default-set run, **A8-a PASSED** — nonce present, and the delegator's own
+    transcript shows real skeptical-operator behavior: its first bounded-wait poll
+    returned a coincidental false-positive (grepping "RESULT:" against the worker's own
+    echoed prompt text, not real output), and rather than trusting it, the delegator
+    ground-truthed the actual output file's size directly and ran a second, genuine
+    ~79-second bounded wait before reporting. **A8-b FAILED** — but the worker's `sleep
+    600` was intercepted in ~2ms by the Bash tool's own guardrail against standalone
+    long sleeps ("Blocked: standalone sleep 600 ... use Monitor ... or
+    run_in_background"), so the intended multi-minute stall never actually occurred; the
+    delegator's final report was independently confirmed honest and non-fabricating, but
+    conditions (1) and (2) were structurally unmet because there was no real stall to
+    detect — a scenario-design gap in A8-b worth refining (a command that reliably keeps
+    running in the background rather than tripping this guardrail), not evidence of
+    dishonest or hung behavior. Separately and unprompted, a **pre-existing, unrelated
+    test (A2, `audit data/facts.md`) failed on the SAME live run** with the exact bug
+    class A8 exists to catch: a long, otherwise-exemplary multi-cycle busy-presence
+    session (real ground-truth checks, real classify-nudges, correct no-relay
+    discipline, ~284 transcript lines of genuine work) still ended its very last turn on
+    "I'll stop here and let the harness re-invoke me on the wakeup or next event" —
+    fatal in `-p` mode regardless of how much correct behavior preceded it. This
+    independently corroborates that the gap A8 is built to catch is real and systemic,
+    not an artifact of A8's own task phrasing — confirmed uncaused by this change (A2's
+    code path is untouched by and disjoint from the A8 additions).
+  - **Cold-verified**: a fresh, independent verifier (no shared context) re-read the raw
+    `.json` results and raw session `.jsonl` transcripts from scratch and independently
+    reproduced both verdicts (PASS/FAIL) — agreeing with `record()`'s logged results on
+    both tests, while flagging that the specific "mechanism evidence" line logged for
+    A8-a cited the coincidental false-positive poll rather than the delegator's own
+    genuine second one (informational, does not change the PASS), and that A8-b's
+    "final report not honest" clause was a keyword-regex miss on honest
+    policy-block language rather than a real dishonesty finding (informational, does not
+    change the FAIL, since conditions (1)/(2) already fail it independently).
+  - **Known, honest gap**: both tests are `-p`-only and structurally cannot exercise the
+    interactive-TTY case (a live terminal session where a delegator rests between user
+    turns rather than looping inside one continuous `-p` invocation) — the operator's
+    ORIGINAL field case that motivated the busy-presence rule. See `docs/test-matrix.md`'s
+    Gaps section for the full write-up and a `tmux`-driven interactive-harness idea for
+    future work.
+
 ## v1.3.1 (2026-07-03)
 
 - **BUSY-PRESENCE RULE (operator field report, screenshot evidence)**: a live

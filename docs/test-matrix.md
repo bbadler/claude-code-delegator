@@ -61,6 +61,7 @@ guaranteed-forever.
 | Isolation (cleanroom: no personal `CLAUDE.md` / auto-memory leak) | A0 | Covered |
 | BMAD adapter (`docs/adapters/bmad.md`) | — | Not exercised — no BMAD-workspace test exists; documentation-only artifact |
 | Roadmap items (T1-T3, N3, X1-X4, L1-L7, M1) | — | N/A for v1.0.0 — unshipped by design (`docs/roadmap-v2.md`), out of scope for this matrix |
+| Busy-presence rule + HEADLESS END-OF-TURN RULE (`agents/delegator.md` Forward-pressure section, v1.3.0/v1.3.1) | A8-a (stay-present-and-collect, nonce-presence proof), A8-b (timeout = suspicion trigger) | Covered (permanent regression pair) — **first live default-set run: A8-a PASS, A8-b FAIL**; independently cold-verified. See `CHANGELOG.md`'s `Unreleased` entry for full evidence: A8-a's pass included genuine skeptical-operator behavior (a coincidental false-positive poll match was NOT trusted; the delegator ground-truthed the real output file before reporting); A8-b's fail was because the worker's `sleep 600` was intercepted by a Bash-tool guardrail in ~2ms (the intended stall never occurred, so conditions requiring a poll-timeout + suspicion action were structurally unmet) rather than dishonest/hung behavior — flagged as a scenario-design gap in A8-b for future refinement. A fully independent, unrelated pre-existing test (A2) failed on the same run with the identical root-cause bug class (a long, otherwise-correct busy-presence session still ending its last turn on an unrecoverable "wait for the harness to re-invoke me" pattern), corroborating that this is a real, systemic, currently-live gap rather than an A8-specific artifact. |
 
 ## Known-issue retests (A1, A7-t5)
 
@@ -144,3 +145,23 @@ grading-logic drift between the two runner implementations.
 - **install.sh's `--verify` mechanism itself is coarse**: it only checks that the three
   agent *names* appear in a plain-text listing, not that their descriptions/content match
   what's on disk.
+- **A8 (`test_a8_a`/`test_a8_b` — busy-presence / timeout-suspicion) is `-p`-only; the
+  interactive-TTY case is NOT covered.** The operator's ORIGINAL field failure that
+  motivated `agents/delegator.md`'s Forward-pressure (busy-presence) section was a real
+  terminal session where a live delegator rested politely between user turns instead of
+  looping in place while children owed deliverables — a multi-turn INTERACTIVE session,
+  not a single `claude -p` process. A8's two tests can only drive `claude -p`: one
+  continuous process whose final turn (a response with no further tool call) ends the
+  process outright, so there is structurally no such thing as "the turn ends but the
+  process keeps lingering" in this mode (see the HEADLESS END-OF-TURN RULE). That means
+  A8 can only prove `-p`-specific mechanics — does the process demonstrably stay alive
+  across a real child wait (A8-a's nonce-presence proof), does a poll timeout get treated
+  as a suspicion trigger and investigated honestly (A8-b) — never whether a genuinely
+  interactive session actually keeps working in place between separate user-visible turns
+  rather than going idle, which is the scenario that actually caused the original bug
+  report. This is a known, honest gap, not an oversight: proving the interactive case
+  needs a genuinely different harness. Future-work idea, unbuilt: a `tmux`-driven
+  interactive-session test that launches `claude` (not `-p`) inside a `tmux` pane, drives
+  it via `tmux send-keys`, and inspects `tmux capture-pane` output over real wall-clock
+  time to check whether a live delegator is still actively working (not silently resting)
+  between turns while a child is outstanding.
