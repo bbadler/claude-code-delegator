@@ -66,6 +66,25 @@ agent_id + agent_type in subagent context. Stop/SubagentStop add background_task
 - **Agent(run_in_background:false)** sync spawns; **mode:"plan"** teammates; **isolation:"remote"** cloud runs.
 - **CronCreate** (session-only cron), **RemoteTrigger** (claude.ai cloud routines).
 
+## Session toolset — complete inventory (every deferred schema ToolSearch'ed and read, 2026-07-03)
+
+| Tool | What it actually is | Delegation relevance |
+|---|---|---|
+| EnterPlanMode / ExitPlanMode | The model can transition ITSELF into plan mode (user approves); ExitPlanMode carries `allowedPrompts` — pre-negotiated permission categories for the implementation phase | plan-gate risky campaign designs; allowedPrompts = permission pre-negotiation at plan-approval time |
+| EnterWorktree / ExitWorktree | The SESSION switches itself into an isolated git worktree mid-session and back (keep/remove + discard_changes guard); `path` switches between existing worktrees; a pinned-cwd AGENT can switch its own worktree without affecting the parent | campaign-level isolation without per-spawn flags; parallel-mutation lanes |
+| Monitor (persistent) | background event streams → notifications while the session keeps working (bash stdout lines or raw WebSocket frames) | live campaign feed (`tail -f` the events ledger); child-sentinel watches |
+| PushNotification | desktop + phone push (≤200 chars), attention-pulling | human-boundary alerts in autonomous mode (DEFERRED gates, completion, stall escalation) |
+| ScheduleWakeup | self-paced wake-ups for /loop dynamic mode (prompt cache-window aware: <270s stays cached, 1200s+ for idle ticks) | self-pacing long campaigns under /loop |
+| Workflow | a WHOLE second orchestration engine: deterministic scripts, agent() leaves with json-schema outputs, pipelines/barriers, token budgets, resume-from-journal | bulk fan-out phases inside campaigns; complements (not replaces) the teams lane |
+| TaskCreate/Update **metadata field** | arbitrary machine-readable metadata per task | carry `{spec_version, spec_file}` STRUCTURED instead of parsing description prose — adopted into the amendment protocol |
+| TaskStop / TaskOutput | TaskStop kills teammates by BARE NAME (proven live: stop-then-amend); TaskOutput blocks on a task's completion | stop-then-amend mechanics; sync collection |
+| CronCreate/List/Delete | session-only cron enqueueing prompts (fires while REPL idle; 7-day expiry; jitter guidance) | fallback sweeps; NOT needed for busy-presence (stop-gate covers it) |
+| RemoteTrigger | claude.ai cloud routines API (list/create/run scheduled cloud agents) | scheduled cloud campaigns (future) |
+| ListMcpResources / ReadMcpResource(Dir) | enumerate + read MCP server resources | MCP-integrated campaigns (soul-crew) |
+| Artifact | publish self-contained web pages (private-by-default, redeployable URL) | campaign dashboards/reports for the operator |
+| AskUserQuestion | main-session-only structured questions (subagent-blocked, probed) | MODE INTAKE + genuine human gates |
+| DesignSync / NotebookEdit / ReportFindings / WebFetch / WebSearch | design-system sync; Jupyter cells; typed review findings; web | task-specific |
+
 ## Trigger-happy env vars (documented only)
 
 CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS · CLAUDE_ENABLE_STREAM_WATCHDOG (default on; 5-min stream
