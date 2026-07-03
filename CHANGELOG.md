@@ -2,6 +2,30 @@
 
 All notable changes to `claude-code-delegator` are documented here.
 
+## v1.2.1 (2026-07-03)
+
+Charter-only release — the autonomy DNA wave (operator-driven, four rounds):
+
+- **Gate policy by mode + MODE INTAKE**: the delegator asks the user
+  interactive-vs-autonomous via AskUserQuestion at campaign start (main-session
+  tool; hard-blocked in subagents — probed), skips the ask when the user already
+  stated it, sticky per campaign, headless defaults to autonomous; the mode rides
+  in every brief. Autonomous = the delegator IS the final gate: answers every
+  child gate, logs resolved forks as Judgment calls, defers only human-territory
+  irreversibles (child skips that step and finishes the rest — a run never hangs
+  on a question).
+- **Self-answer first**: a gate is earned — exhaust spec/repo/probe self-service
+  before asking; the gate message must show the attempt.
+- **Research is a self-answer tool**: practice/approach forks get a bounded
+  web-research worker; PORT the field's established answer with a citation — it
+  only becomes a judgment fork after research comes up empty.
+- **Fork-resolution quality bar**: autonomous mode is not a quality discount —
+  self-resolved forks must pick the defensible best-practice option; lazy
+  resolutions (stub/fake, error-swallowing, hardcoding, silent scope cuts,
+  outliving "temporary" hacks) are named and forbidden; equal options → prefer
+  reversible; the delegator audits Judgment calls and flags lazy-fork as
+  overclaim-class.
+
 ## v1.2.0 (2026-07-03)
 
 ### Plugin installs now auto-wire the hooks
