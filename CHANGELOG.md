@@ -2,6 +2,15 @@
 
 All notable changes to `claude-code-delegator` are documented here.
 
+## v1.2.3 (2026-07-03)
+
+- **Skill gates are not forks (operator clarification)**: any decision point a
+  SKILL presents (menu / HALT / elicitation / "ask the user") is the user's
+  decision by design — it bypasses the orchestrator's self-answer/research ladder
+  entirely and is ALWAYS relayed verbatim to the spawner, in every mode; the
+  delegator answers it as user-proxy per the mode policy and never bounces it
+  back down. The ladder applies only to ambiguities in the agent's own work.
+
 ## v1.2.2 (2026-07-03)
 
 - **Autonomy correction (operator-caught)**: v1.2.1's orchestrator bullet told
