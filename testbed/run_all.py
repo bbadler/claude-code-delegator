@@ -37,6 +37,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 TESTBED_DIR = Path(__file__).resolve().parent
@@ -65,6 +66,58 @@ def say(msg):
 def record(test_id, status, evidence):
     results.append((test_id, status, evidence))
     print(f"    [{status}] {test_id} — {evidence}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# v1.2.0 campaign registration — mirrors testbed/cleanroom.sh's and
+# testbed/stress-tests.sh's shell-side mint_campaign() (kept in sync by hand;
+# no shared lib between the bash fixtures and this python runner — see this
+# module's own docstring on why porting THEM is out of scope). Every real
+# `claude -p --agent delegator` (or `--agent delegation-kit:delegator`)
+# invocation below now mints its own fresh session id and registers it in
+# ~/.claude/projects/<slug>/delegator/sessions.json BEFORE running, so its
+# ledger/registry evidence lands at a location this runner knows in advance
+# (needed for A1/A4's ledger-delta assertions). Always a FRESH mint, never a
+# reuse-check across invocations: an explicit --session-id cannot be reused
+# across two separate non-resumed `claude -p` calls (confirmed live: "Error:
+# Session ID <uuid> is already in use"), so every call below gets its own id
+# and its own empty campaign directory — cleaner than the old shared-file
+# delta-counting this replaces (pre is always 0 for a brand-new campaign dir).
+# ---------------------------------------------------------------------------
+_SLUG_RE = re.compile(r"[/._]")
+
+
+def _slug_of(path):
+    return _SLUG_RE.sub("-", os.path.abspath(str(path)))
+
+
+def _project_dir(workdir):
+    return CLEAN / ".claude" / "projects" / _slug_of(workdir)
+
+
+def mint_campaign(workdir):
+    """Mint a fresh delegator campaign for `workdir`: a session id, its own
+    empty campaign directory, and a merged {sid: sid} self-mapping entry in
+    <project-dir>/delegator/sessions.json (load-merge-write, never clobbering
+    other entries already registered for this project dir). Also leaves the id
+    at "<workdir>.session-id" (sibling file, never inside the workspace itself)
+    for parity with the shell-side fixtures, discoverable by anything that
+    wants to know which campaign a given run used after the fact.
+    Returns (session_id, campaign_dir: Path)."""
+    ddir = _project_dir(workdir) / "delegator"
+    sid = str(uuid.uuid4())
+    (ddir / sid).mkdir(parents=True, exist_ok=True)
+    sessions_path = ddir / "sessions.json"
+    try:
+        sessions = json.loads(sessions_path.read_text())
+        if not isinstance(sessions, dict):
+            sessions = {}
+    except Exception:
+        sessions = {}
+    sessions[sid] = sid
+    sessions_path.write_text(json.dumps(sessions, indent=2))
+    Path(str(workdir) + ".session-id").write_text(sid)
+    return sid, ddir / sid
 
 
 # ---------------------------------------------------------------------------
@@ -287,8 +340,9 @@ def claude_cmd(*extra_args):
 
 def test_a0():
     tid = "A0"
+    sid, _ = mint_campaign(WORK)
     out = LOGDIR / "a0.json"
-    cmd = claude_cmd("--agent", "delegator", "--output-format", "json", PROMPT_A0)
+    cmd = claude_cmd("--agent", "delegator", "--session-id", sid, "--output-format", "json", PROMPT_A0)
     rc = run_with_retry_json(out, cmd, cwd=str(WORK))
     if rc == 2:
         record(tid, "SKIPPED-LIMIT", f"rate-limited twice; {out}")
@@ -309,10 +363,17 @@ def test_a0():
 def test_a1():
     global A1_SPAWN_DELTA
     tid = "A1"
-    events = WORK / ".delegator" / "events.jsonl"
-    pre = ledger_linecount(events)
+    # Mint+register HERE (python side) so the campaign dir is known BEFORE
+    # run-tests.sh runs — run-tests.sh's own mint_or_use_session_id() sees this
+    # sidecar id is still unconsumed (no transcript yet) and reuses it verbatim,
+    # so the real session lands exactly where we just pre-registered it. See
+    # run-tests.sh's usage comment for the $2 pass-through contract.
+    sid, campaign_dir = mint_campaign(WORK)
+    events = campaign_dir / "events.jsonl"
+    registry = campaign_dir / "registry.json"
+    pre = ledger_linecount(events)  # always 0 for a brand-new campaign dir; kept explicit
     out = LOGDIR / "a1.json"
-    rc = run_with_retry_json(out, ["./run-tests.sh", "t1"], cwd=str(TESTBED_DIR))
+    rc = run_with_retry_json(out, ["./run-tests.sh", "t1", sid], cwd=str(TESTBED_DIR))
     if rc == 2:
         record(tid, "SKIPPED-LIMIT", f"rate-limited twice; {out}")
         return
@@ -329,23 +390,23 @@ def test_a1():
     spawn_delta = agent_spawn_delta(events, pre)
     A1_SPAWN_DELTA = spawn_delta
     if spawn_delta < 1:
-        reasons.append("events.jsonl has 0 new tool=Agent rows (want >=1)")
-    registry = WORK / ".delegator" / "registry.json"
+        reasons.append(f"events.jsonl has 0 new tool=Agent rows (want >=1) — {events}")
     if registry.is_file():
         if not registry_has_orchestrator(registry):
             reasons.append("registry.json has no agent_type=orchestrator row")
     else:
-        reasons.append("registry.json missing")
+        reasons.append(f"registry.json missing — {registry}")
     if not reasons:
-        record(tid, "PASS", f"census-report.md total=8; events.jsonl +{spawn_delta} Agent-spawn rows; registry.json names an orchestrator")
+        record(tid, "PASS", f"census-report.md total=8; events.jsonl +{spawn_delta} Agent-spawn rows; registry.json names an orchestrator (session={sid})")
     else:
         record(tid, "FAIL", "; ".join(reasons))
 
 
 def test_a2():
     tid = "A2"
+    sid, _ = mint_campaign(WORK)
     out = LOGDIR / "a2.json"
-    rc = run_with_retry_json(out, ["./run-tests.sh", "t2"], cwd=str(TESTBED_DIR))
+    rc = run_with_retry_json(out, ["./run-tests.sh", "t2", sid], cwd=str(TESTBED_DIR))
     if rc == 2:
         record(tid, "SKIPPED-LIMIT", f"rate-limited twice; {out}")
         return
@@ -376,8 +437,9 @@ def test_a3():
     audit = WORK / "audit-report.md"
     if audit.exists():
         audit.unlink()
+    sid, _ = mint_campaign(WORK)
     out = LOGDIR / "a3.json"
-    cmd = claude_cmd("--agent", "delegator", "--output-format", "json", PROMPT_A3)
+    cmd = claude_cmd("--agent", "delegator", "--session-id", sid, "--output-format", "json", PROMPT_A3)
     rc = run_with_retry_json(out, cmd, cwd=str(WORK))
     if rc == 2:
         record(tid, "SKIPPED-LIMIT", f"rate-limited twice; {out}")
@@ -398,13 +460,14 @@ def test_a3():
 
 def test_a4():
     tid = "A4"
-    events = WORK / ".delegator" / "events.jsonl"
-    pre = ledger_linecount(events)
+    sid, campaign_dir = mint_campaign(WORK)
+    events = campaign_dir / "events.jsonl"
+    pre = ledger_linecount(events)  # always 0 for a brand-new campaign dir; kept explicit
     census = WORK / "census-report.md"
     if census.exists():
         census.unlink()
     out = LOGDIR / "a4.json"
-    cmd = claude_cmd("--agent", "delegator", "--output-format", "json", PROMPT_A4)
+    cmd = claude_cmd("--agent", "delegator", "--session-id", sid, "--output-format", "json", PROMPT_A4)
     rc = run_with_retry_json(out, cmd, cwd=str(WORK))
     if rc == 2:
         record(tid, "SKIPPED-LIMIT", f"rate-limited twice; {out}")
@@ -427,7 +490,7 @@ def test_a4():
     if spawn_delta <= baseline and not mentions_verifier:
         reasons.append(f"no evidence of an extra verifier spawn: delta={spawn_delta} vs A1 no-verifier baseline={baseline}, and text doesn't mention a verifier")
     if not reasons:
-        record(tid, "PASS", f"sentinel='{sentinel}'; spawn_delta={spawn_delta} (A1 baseline={baseline})")
+        record(tid, "PASS", f"sentinel='{sentinel}'; spawn_delta={spawn_delta} (A1 baseline={baseline}; session={sid})")
     else:
         record(tid, "FAIL", "; ".join(reasons))
 
@@ -448,8 +511,9 @@ def test_a5():
     census = WORK / "census-report.md"
     if census.exists():
         census.unlink()
+    sid, _ = mint_campaign(WORK)
     out = LOGDIR / "a5.json"
-    cmd = claude_cmd("--agent", "delegation-kit:delegator", "--output-format", "json", PROMPT_A5)
+    cmd = claude_cmd("--agent", "delegation-kit:delegator", "--session-id", sid, "--output-format", "json", PROMPT_A5)
     rc = run_with_retry_json(out, cmd, cwd=str(WORK))
     # restore unconditionally before grading/returning
     if agents_dir.exists():

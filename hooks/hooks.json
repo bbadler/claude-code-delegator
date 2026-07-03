@@ -1,0 +1,33 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Agent|SendMessage",
+        "hooks": [
+          {"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py\"", "timeout": 10}
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py\"", "timeout": 10}
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py\"", "timeout": 10}
+        ]
+      }
+    ],
+    "TeammateIdle": [
+      {
+        "hooks": [
+          {"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ledger.py\"", "timeout": 10}
+        ]
+      }
+    ]
+  }
+}

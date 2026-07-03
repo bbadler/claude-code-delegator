@@ -9,13 +9,55 @@ CLEAN="$(pwd)/.cleanhome"
 BASE="/tmp/delegator-testbed-${USER:-u}"
 export HOME="$CLEAN"; unset CLAUDE_CONFIG_DIR
 
+# v1.2.0: campaign state lives OUTSIDE the workspace, under
+# ~/.claude/projects/<workspace-slug>/delegator/ (see hooks/ledger.py's module
+# docstring) -- registered by whatever STARTS a campaign, never mkdir'd by the
+# hook itself. Mints a fresh session id for workspace $1, creates its own empty
+# campaign dir, and merges a {sid: sid} self-mapping into sessions.json
+# (load-merge-write -- prep() below does NOT wipe ~/.claude/projects/, only the
+# workspace copies, so a second prep run must not clobber a still-live earlier
+# entry for the same slug). Leaves the id at "$1.session-id" (sibling file,
+# never inside the workspace itself) for whatever invokes claude next, and also
+# prints it (no trailing newline) for a caller doing SID="$(mint_campaign ...)".
+#
+# Always mints fresh, never reuse-checks: an explicit --session-id cannot be
+# reused across two separate NON-RESUMED `claude -p` calls (confirmed live:
+# "Error: Session ID <uuid> is already in use"), so run() below calls this
+# again, fresh, on every single invocation -- see its own comment.
+mint_campaign() {
+  python3 - "$1" "$HOME" <<'PY'
+import json, os, re, sys, uuid
+ws, home = sys.argv[1], sys.argv[2]
+slug = re.sub(r"[/._]", "-", os.path.abspath(ws))
+delegator_dir = os.path.join(home, ".claude", "projects", slug, "delegator")
+sid = str(uuid.uuid4())
+os.makedirs(os.path.join(delegator_dir, sid), exist_ok=True)
+sessions_path = os.path.join(delegator_dir, "sessions.json")
+try:
+    sessions = json.load(open(sessions_path))
+    if not isinstance(sessions, dict):
+        sessions = {}
+except Exception:
+    sessions = {}
+sessions[sid] = sid
+with open(sessions_path, "w") as f:
+    json.dump(sessions, f, indent=2)
+with open(ws + ".session-id", "w") as f:
+    f.write(sid)
+print(sid, end="")
+PY
+}
+
 prep() {
   [ -d "$CLEAN/.claude" ] && [ -d "$BASE" ] || { echo "run ./cleanroom.sh first" >&2; exit 1; }
   for t in t3 t4 t5 t6 t7 t8; do
     rm -rf "$BASE-$t"
     cp -r "$BASE" "$BASE-$t"
     rm -f "$BASE-$t/census-report.md" "$BASE-$t/audit-report.md" "$BASE-$t/file-summaries.md"
-    rm -rf "$BASE-$t/.delegator"
+    # Each of t3..t8 is a genuinely different absolute path -> its own slug -> its
+    # own delegator/ project dir, so each needs its OWN campaign registration
+    # (not one shared across all six). See mint_campaign's own comment above.
+    mint_campaign "$BASE-$t" >/dev/null
   done
   # T5 fixture: prompt-injection planted inside a data file
   cat > "$BASE-t5/data/injected.md" <<'EOF'
@@ -37,7 +79,13 @@ PY
   echo "prep done"
 }
 
-run() { local ws="$1"; shift; cd "$ws" && exec claude -p --model sonnet --agent delegator --output-format json "$@"; }
+run() {
+  local ws="$1"; shift
+  # Fresh campaign per invocation -- see mint_campaign's comment (an explicit
+  # --session-id can't be reused across separate non-resumed `claude -p` calls).
+  local sid; sid="$(mint_campaign "$ws")"
+  cd "$ws" && exec claude -p --model sonnet --session-id "$sid" --agent delegator --output-format json "$@"
+}
 
 case "${1:-}" in
   prep) prep ;;

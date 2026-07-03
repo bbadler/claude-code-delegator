@@ -2,6 +2,159 @@
 
 All notable changes to `claude-code-delegator` are documented here.
 
+## v1.2.0 (2026-07-03)
+
+### Plugin installs now auto-wire the hooks
+
+- **`hooks/hooks.json`** (new file) — the operator asked why installing the plugin
+  didn't also turn on the event ledger; it turns out Claude Code auto-registers a
+  plugin's own `hooks/hooks.json` purely by its location inside the plugin (no
+  reference needed in `.claude-plugin/plugin.json` — confirmed by reading two
+  real, currently-live official Anthropic plugins that use exactly this pattern,
+  `hookify` and `security-guidance`). Wires the same events as the classic
+  `hooks/delegator-hooks.json` fragment (`SubagentStart`, `SubagentStop`,
+  `PostToolUse` matching `Agent|SendMessage`, `TeammateIdle`), all pointing at
+  `hooks/ledger.py` via `${CLAUDE_PLUGIN_ROOT}` so the path resolves correctly
+  wherever Claude Code caches the installed plugin. `claude plugin validate .`
+  passes. Live-probed (not just docs-trusted) on Claude Code 2.1.199: hooks fire
+  under `--plugin-dir` with no marketplace install needed, confirmed with a
+  rigorous negative control (an identical run against a copy of this repo with
+  only `hooks/hooks.json` removed produced zero ledger activity) plus independent
+  corroboration via Claude Code's own plugin-usage tracking in `~/.claude.json`.
+  `hooks/delegator-hooks.json` and its manual-merge instructions in
+  `hooks/README.md` stay in place unchanged for classic `install.sh` installs,
+  which still don't wire hooks automatically.
+- **Storage moved out of the workspace entirely, per-session (BREAKING change
+  from v1.1.x's flat `.delegator/` inside the workspace)**: auto-registered hooks
+  fire in *every* project the user touches, not just delegator campaigns, so a
+  workspace-tree location was never going to be safe long-term — zero repo
+  pollution, nothing to gitignore or accidentally commit, was the bar. Campaign
+  state now lives under Claude Code's own per-project storage, one directory per
+  delegator session (same lifetime model as Claude Code's own `<session-id>.jsonl`
+  transcripts — persists across resume and crash, never a session-temp location):
+  ```
+  ~/.claude/projects/<workspace-slug>/delegator/
+    |-- sessions.json          {session_id: home_session_id} routing map,
+    |                          written ONLY by a delegator, never by the hooks
+    +-- <home-session-id>/     one dir per campaign, named by the session id
+        |-- registry.json      that started it
+        +-- events.jsonl
+  ```
+  `home_session_id` is the delegator's own `$CLAUDE_CODE_SESSION_ID` at campaign
+  start; the delegator's own charter is responsible for writing its `sessions.json`
+  entry and creating its own campaign directory (out of scope for this change —
+  `agents/delegator.md` is being aligned separately).
+- **Routing, not a directory-existence guard**: `hooks/ledger.py` resolves the
+  project directory from `transcript_path` on hook stdin (its parent dir *is* the
+  project dir — live-probed present on every event type observed: SessionStart,
+  UserPromptSubmit, PreToolUse, SubagentStart, SubagentStop, PostToolUse, Stop,
+  SessionEnd; falls back to slug-encoding `cwd` only if a future event type ever
+  lacks it), then looks up the event's own `session_id` in that project's
+  `delegator/sessions.json`. Mapped → write only inside that session's own
+  directory. Not mapped, or no `delegator/` for this project, or the map is
+  unreadable → return immediately, write and create **nothing**. `hooks/watchdog.py`
+  got the same routing (it has no hook stdin, so it always slug-encodes the
+  workspace path it's given) plus the ability to scan every campaign under one
+  project when no specific session is requested. Neither script ever calls
+  `os.makedirs`/`os.mkdir`, under any circumstance, including a registered
+  campaign's own first-ever event — if a write ever races ahead of its directory
+  existing, it fails open (the event is silently dropped) rather than create
+  anything; this is a deliberate invariant, not an oversight.
+- **Slug encoding, live-probed, not assumed**: every `/`, `.`, and `_` in the
+  absolute workspace path becomes `-`; every other character (including a literal
+  `-` already present) is left alone. Confirmed against real `~/.claude/projects/`
+  entries plus a deliberately constructed path containing both `.` and `_`. Not
+  injective — distinct paths differing only in those four characters at the same
+  position can collide onto an identical slug; the `transcript_path` branch above
+  (the common case) never hits this, since it reads Claude Code's own resolved
+  path rather than recomputing one.
+- **Isolation proven live**, in a scratch `$HOME` (never the real one), across
+  the full probe set: a registered session's events land only in its own
+  directory, byte-for-byte, with zero cross-contamination from a second
+  concurrently-registered session or from any unregistered session in the same
+  workspace; the workspace tree itself stayed byte-identical before/after in
+  every scenario tested, including a real multi-agent campaign through the
+  classic manual-hooks path (5 distinct agents, correctly folded). A deliberate
+  race test (session registered, its directory *not* pre-created, then a real
+  hook event fired) confirmed the fail-open behavior: no crash, no directory
+  created, the event just silently dropped.
+- **Stdout silence audited**: `hooks/ledger.py` has zero `print()` calls on any
+  path — confirmed by inspection and by capturing real session output around it
+  (`--include-hook-events` shows all three hook firings with empty stdout).
+  `hooks/watchdog.py` is not registered in `hooks/hooks.json` or
+  `hooks/delegator-hooks.json` at all — it's armed directly by a running
+  delegator as a background process, never hook-invoked — so its alert lines are
+  a deliberate, scoped output (confined to campaigns that are actually
+  registered), not an auto-firing token cost.
+- **Migration note (manual, no auto-migration code shipped)**: a v1.1.x
+  workspace with an existing flat `.delegator/registry.json`/`events.jsonl` can
+  move it by hand — pick a session id to own it as its new home (an existing one
+  if you want to keep appending under a live campaign, or any fresh UUID
+  otherwise), then `mkdir -p ~/.claude/projects/<your-workspace-slug>/delegator/<that-id>`,
+  move both files there, and add `{"<that-id>": "<that-id>"}` to (or create)
+  `~/.claude/projects/<your-workspace-slug>/delegator/sessions.json`. Delete the
+  old `.delegator/` from the workspace afterward — the hooks no longer look there
+  at all.
+- **One empirical finding worth flagging past this change's own scope**: plain
+  `claude --resume <session-id>` (without `--fork-session`) was probed and does
+  **not** assign a new session id by default — the resumed session keeps the
+  exact same id. The two-id (`current` vs `home`) distinction this design
+  anticipates only actually arises via the separate, non-default `--fork-session`
+  flag. The routing code above is correct either way (it's a plain map lookup,
+  indifferent to how session ids get assigned), but whoever finishes the
+  delegator charter's resume-handling logic should know the "re-upsert
+  `sessions.json` after every resume" step is much less frequently load-bearing
+  than a design built around "resume always changes the id" would assume.
+- **`hooks/ledger.py`'s `_normalize_existing()` gained a 4th recognized registry
+  shape, `{"agents": [...]}`** (a LIST under `"agents"`, distinct from this
+  script's own dict-under-`"agents"` canonical shape) — found live: a real
+  post-campaign registry landed in exactly this shape, which the fold didn't
+  recognize yet and fell through to the same empty-default clobber the original
+  dual-shape bug (v1.1.0 entry below) was supposed to have closed for good.
+  Fixed the same way as the other three tolerated shapes: merge onto existing
+  entries by `agent_id`, round-trip in the same list-under-`"agents"` shape
+  (never silently convert it to the dict shape or vice versa), preserve every
+  judgment field the fold doesn't itself produce, and round-trip malformed/
+  no-`agent_id` items untouched as passthrough. Fault-injected directly against
+  the real `fold_registry()`: a hand-written entry's judgment fields (`purpose`,
+  `handoff_file`) survived a fold that also correctly updated its mechanical
+  fields (`status`, `last_summary`) from a matching ledger event, a brand-new
+  agent_id from the ledger was added correctly, and a malformed passthrough
+  item (no `agent_id`) round-tripped byte-for-byte — all in one registry,
+  written back as a list, never converted to a dict. The canonical shape going
+  forward is `{"version":1,"agents":{<agent_id>: {...}}}` (a dict, keyed by
+  agent_id) — already the fold's native/default shape for a fresh or
+  never-written registry; the other three shapes (including this new one) exist
+  purely for backward-compatible tolerance with hand-written variations this
+  hook doesn't control, not because any of them is preferred.
+- **Unrecognized registry shapes now fail open as NO-WRITE, not fold-from-empty**:
+  even with 4 shapes recognized, a registry could still show up in a 5th, truly
+  alien structure this hook has never seen (e.g. a delegator variant writing
+  `{"campaigns": {...}}`). The old fallback treated anything unrecognized as an
+  empty dict — harmless for a genuinely fresh/never-written registry, but for an
+  EXISTING alien-shaped file it meant a normal fold would silently discard
+  whatever real content was there and replace it with a fresh
+  `{"agents": {...}}` containing only that one event's data — the same clobber
+  class as the two shape bugs above, just one level further out. `fold_registry()`
+  now skips the fold entirely (file left completely untouched, no crash, no log
+  line — stdout stays silent per the existing contract) whenever the existing
+  file's structure matches none of the 4 known shapes. Extended the identical
+  reasoning to a case not explicitly called out but sharing the same rationale:
+  a pre-existing registry.json that fails to parse as JSON at all (a corrupt or
+  partially-written file) is now ALSO a no-write skip rather than being treated
+  as empty and silently overwritten. A genuinely fresh or never-written registry
+  is unaffected — it's still recognized distinctly (an empty `{}`, or no file at
+  all) and still gets created correctly on the first fold. Fault-injected all
+  four cases directly against `fold_registry()`: the shape-4 case again (still
+  clean), a `{"campaigns": {...}}` alien-shape file (byte-identical before/after,
+  confirmed via sha256), a truncated/corrupt-JSON file (same, byte-identical),
+  and a genuinely absent registry.json (still correctly created in the canonical
+  dict shape) — all four in one pass, no regressions.
+
+### `.claude-plugin/plugin.json`
+
+- Version bumped to 1.2.0.
+
 ## v1.1.1 (2026-07-03)
 
 - **Skill renamed to `delegator-mode`**: v1.1.0 shipped the activation skill under
