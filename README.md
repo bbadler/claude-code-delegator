@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.172-8A2BE2)](https://code.claude.com/docs/en/sub-agents)
 [![Plugin](https://img.shields.io/badge/plugin-delegation--kit-blue)](#-quick-start)
-[![Probe--proven](https://img.shields.io/badge/physics-11%20live%20probes-orange)](#-probe-proven-physics)
+[![Probe--proven](https://img.shields.io/badge/physics-18%2B%20live%20probes-orange)](#-probe-proven-physics)
 [![Testbed](https://img.shields.io/badge/cleanroom%20suite-green-brightgreen)](docs/testbed-results.md)
 
 `skill-driven spawning` · `approval gates` · `crash-safe resume` · `zero-pollution context` · `cleanroom test harness`
@@ -48,21 +48,23 @@ flowchart TD
     W1 -->|"RESULT sentinel, collect-in-turn"| O1
     W2 -->|"RESULT sentinel, collect-in-turn"| O1
 
-    O1 -.->|"hooks append events"| L[("🧾 .delegator/ ledger + registry")]
+    O1 -.->|"hooks append events"| L[("🧾 per-session ledger + registry")]
     O2 -.-> L
     L -.->|"watchdog + revival seed"| D
 ```
 
 ## ⚡ Quick start
 
-**As a plugin (recommended):**
+**As a plugin (recommended — the only path that wires everything):**
 
 ```
 /plugin marketplace add bbadler/claude-code-delegator
 /plugin install delegation-kit@claude-code-delegator
 ```
 
-**Or classic install:**
+You get the three agent types (namespaced, e.g. `delegation-kit:delegator`), the `delegator-mode` skill, **and the event-ledger hooks auto-wired** — no settings edits. The hooks are guarded: only sessions registered by a delegator campaign ever write anything; every other session (and every repo working tree) is left completely untouched.
+
+**Or classic install** (agents + skill; hooks stay a manual, documented merge — a script editing your `settings.json` would be its own blast radius):
 
 ```bash
 git clone https://github.com/bbadler/claude-code-delegator && cd claude-code-delegator
@@ -95,7 +97,8 @@ Optional, per workspace: declare a router in the workspace `CLAUDE.md` — `Rout
 | **One session drowning over a long project** | *zero-pollution*: the delegator does only zero-tool work directly; every tool-touching job runs in a fork or subagent that absorbs the output |
 | **The ack-then-wait stall** — an agent spawns a background child, rests, and never wakes | ships the two probe-proven wait patterns: **collect-in-turn** (sentinel-grep the child's output file) and **rest-with-ping** (the child explicitly messages its named parent — that *does* wake it) |
 | **Lost campaigns on crash or restart** | agents revive from their on-disk transcripts via `SendMessage(agentId)` — proven across a real process kill — plus continuous state snapshots as the fallback seed |
-| **Registries that agents "forget" to write** | harness **hooks** append every spawn/stop to `.delegator/events.jsonl` and fold a registry from it — deterministic, no model discipline required ([`hooks/`](hooks/README.md)) |
+| **Registries that agents "forget" to write** | harness **hooks** (auto-wired by the plugin) append every spawn/stop to a per-session ledger under `~/.claude/projects/<project>/delegator/` and fold a registry from it — deterministic, no model discipline required, your repo never touched, concurrent sessions can't mix ([`hooks/`](hooks/README.md)) |
+| **Unattended runs that stall on a question — or bulldoze through with lazy shortcuts** | **mode intake** at campaign start (interactive vs autonomous, asked once via AskUserQuestion); autonomous = the delegator answers every gate itself and logs audited **Judgment calls**; forks go through a self-answer → web-research → quality-bar ladder — lazy resolutions (stubs, error-swallowing, silent scope cuts) are named and forbidden |
 | **Reports you can't trust** | the delegator ships a **skeptical-operator doctrine**: reports are claims; load-bearing facts get spot-checked by cold agents; irreversible actions require independent verification |
 | **Mid-flight spec changes that get ignored** — you message a busy agent a correction; it finishes the *old* plan first (messages queue until its turn ends) | **amendment protocol**: briefs live in spec *files* (`.delegator/specs/` + `spec_version`) — re-readable mid-turn, unlike messages; breaking changes = stop-then-amend; the rule cascades to workers (abandon-and-respawn + triage, never merge stale-spec results) |
 
@@ -176,7 +179,7 @@ Yes — manual-only, deliberately: add `{ "agent": "delegator" }` to the workspa
 |---|---|
 | [`agents/`](agents/) | `delegator.md` (the switch) · `orchestrator.md` (the workhorse type) · `worker.md` (lean leaf) |
 | [`skills/`](skills/) | `delegator-mode/` — say "activate delegator" in any chat: session-only switch, zero config writes (built + evaled through the real skill-creator flow) |
-| [`hooks/`](hooks/README.md) | event ledger → derived registry (`ledger.py`) + dead-man `watchdog.py` — opt-in, stdlib-only, macOS-portable |
+| [`hooks/`](hooks/README.md) | event ledger → derived registry (`ledger.py`) + dead-man `watchdog.py` — **auto-wired by the plugin**, guarded (unregistered sessions leave zero trace), per-session storage, stdlib-only, macOS-portable |
 | [`testbed/`](testbed/) | cleanroom + graded suites: `cleanroom.sh` · `run_all.py` (graded runner) · `run-tests.sh` · `stress-tests.sh` |
 | [`docs/`](docs/) | design (TH) · testbed results · roadmap v2 · [BMAD adapter](docs/adapters/bmad.md) |
 | [`.claude-plugin/`](.claude-plugin/) | plugin + single-repo marketplace manifests (`claude plugin validate .` passes) |
