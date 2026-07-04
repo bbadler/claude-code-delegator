@@ -2,6 +2,28 @@
 
 All notable changes to `claude-code-delegator` are documented here.
 
+## Unreleased
+
+- **`LOOP_AGENT` watchdog signal (closes #4).** The v1.4 watchdog catches a child
+  that is *silent-and-still* (`STALE_AGENT`) but had no signal for the sibling
+  failure — a child that is *noisy-but-spinning*: making the SAME tool call with the
+  SAME args over and over inside one turn, so it never idles and every time-based
+  liveness cue (ledger freshness, transcript growth) reads as healthy. This is the
+  149×-identical-`check-status-gate` loop that only a human's transcript audit caught.
+  The ledger can't see it (`PostToolUse` is wired only for `Agent|SendMessage`, so an
+  MCP-tool loop emits zero ledger rows), so detection reads the child's OWN transcript
+  at `<project>/<session>/subagents/agent-<id>.jsonl`, hashes each `tool_use`'s
+  (name, args), and flags a trailing run of ≥5 identical consecutive calls —
+  `LOOP_AGENT <name> repeated <tool> x<n> (same args) (owes: …)`, injected the same
+  way `STALE_AGENT` is (PostToolUse / UserPromptSubmit `additionalContext`). Emitted in
+  both hook mode and the manual/background sweep. Consecutive-identical (not "N in a
+  window") keeps false positives near zero — a healthy agent hammering one tool varies
+  its args. Deduped via a separate `last_loop_alert_at` field so a loop and a stale
+  alert never suppress each other. Fully fail-open, stdlib-only. New self-test
+  `hooks/test_watchdog_loop.py` (6 checks). Still open in #4: interrupting a
+  within-turn loop (SendMessage only lands at a turn boundary) and a child-side
+  auto-escalation reflex — this closes the *detection* half.
+
 ## v1.4.1 (2026-07-03)
 
 Bug-fix follow-up to v1.4.0 — all found by investigating the first real full-suite
