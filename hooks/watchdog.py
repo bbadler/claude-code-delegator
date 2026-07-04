@@ -60,10 +60,13 @@ usage: watchdog.py [workspace-dir] [stale-minutes] [home-session-id]
                     campaigns at once).
 """
 import datetime
+import glob
+import hashlib
 import json
 import os
 import re
 import sys
+from collections import deque
 
 import ledger
 
@@ -72,6 +75,22 @@ _SLUG_RE = re.compile(r"[/._]")
 DEFAULT_SOFT_TIMEOUT_MIN = 15.0
 DEDUPE_WINDOW_SEC = 10 * 60
 EXCLUDED_STATUSES = {"stopped", "retired", "died"}
+
+# LOOP_AGENT (github issue #4): the sibling of STALE_AGENT. STALE catches a
+# child that is silent-and-still (last ledger row is SubagentStart, gone quiet);
+# LOOP catches a child that is noisy-but-spinning -- making the SAME tool call
+# with the SAME args over and over inside a single turn, so it never idles and
+# every time-based liveness signal (ledger freshness, transcript growth) reads
+# as healthy. The ledger can't see this: PostToolUse is wired only for
+# matcher "Agent|SendMessage", so an MCP-tool loop (e.g. 149x check-status-gate)
+# emits no ledger rows at all. The only surface that records every call is the
+# child's OWN transcript, at <project>/<session>/subagents/agent-<id>.jsonl.
+# We tail that, hash each tool_use's (name,args), and flag a trailing run of
+# >= LOOP_THRESHOLD identical consecutive calls. Consecutive-identical (not
+# merely "N times in a window") keeps false positives near zero: a healthy
+# agent that legitimately calls one tool repeatedly varies its args.
+LOOP_THRESHOLD = 5
+LOOP_TAIL_LINES = 400
 
 
 def resolve_project_dir(workdir, home=None):
@@ -151,6 +170,33 @@ def check_stale_agents(rows, now, stale_sec):
             idle_min = int(idle_sec // 60)
             out.append(
                 f"WATCHDOG: STALE_AGENT {aid} last_event={r.get('event')}@{r.get('ts')} idle_min={idle_min}"
+            )
+    return out
+
+
+def check_looping_agents(rows, project_dir):
+    """Manual/background-mode counterpart to build_loop_alerts (github issue #4):
+    for the latest row per agent, read that agent's transcript and flag a
+    trailing run of identical tool calls. Keyed off ledger rows (no registry) to
+    match this mode's other checks; fail-open per agent."""
+    if not project_dir:
+        return []
+    latest = {}
+    for r in rows:
+        aid = r.get("agent_id")
+        if not aid:
+            continue
+        if aid not in latest or r.get("ts", "") > latest[aid].get("ts", ""):
+            latest[aid] = r
+    out = []
+    for aid, r in latest.items():
+        transcript = find_agent_transcript(project_dir, aid, r.get("session_id"))
+        if not transcript:
+            continue
+        hit = detect_trailing_loop(transcript)
+        if hit:
+            out.append(
+                "WATCHDOG: LOOP_AGENT %s repeated %s x%d (same args)" % (aid, hit[0], hit[1])
             )
     return out
 
@@ -241,8 +287,124 @@ def build_stale_alerts(latest_by_agent, entries_by_agent_id, now):
     return alerts, to_stamp
 
 
-def stamp_last_alert_at(campaign_dir, agent_ids, ts):
-    """Safely stamp last_alert_at=ts onto each of the given agent_ids' existing
+# ---- LOOP_AGENT detection (github issue #4) ----
+
+def find_agent_transcript(project_dir, agent_id, session_id):
+    """Locate a child agent's own transcript JSONL -- the only file that records
+    EVERY tool call it makes (the ledger only carries Agent|SendMessage rows, so
+    an MCP-tool loop is invisible there). Layout is
+    <project_dir>/<session_id>/subagents/agent-<agent_id>.jsonl; we try that
+    exact path first, then glob across any session subdir under project_dir as a
+    fallback (a child may be filed under a home session id that differs from its
+    registry `session_id`). Returns a path or None -- fail-open, never raises."""
+    if not (project_dir and agent_id):
+        return None
+    try:
+        if session_id:
+            direct = os.path.join(
+                project_dir, session_id, "subagents", "agent-%s.jsonl" % agent_id
+            )
+            if os.path.isfile(direct):
+                return direct
+        hits = glob.glob(
+            os.path.join(project_dir, "*", "subagents", "agent-%s.jsonl" % agent_id)
+        )
+        return hits[0] if hits else None
+    except Exception:
+        return None
+
+
+def _tool_signatures(transcript_path, tail_lines=LOOP_TAIL_LINES):
+    """Ordered list of (tool_name, args_hash) for each tool_use block in the last
+    `tail_lines` lines of a Claude Code transcript. Memory-bounded (deque tail),
+    stdlib-only, tolerant of malformed lines/blocks. args_hash is a short sha1 of
+    the canonically-serialized tool input so identical calls collide and any
+    difference (even one arg) separates them."""
+    sigs = []
+    try:
+        with open(transcript_path, errors="replace") as f:
+            lines = deque(f, maxlen=tail_lines)
+    except Exception:
+        return sigs
+    for line in lines:
+        try:
+            msg = json.loads(line).get("message", {})
+        except Exception:
+            continue
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        for block in msg.get("content") or []:
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            name = block.get("name") or "?"
+            try:
+                canon = json.dumps(block.get("input") or {}, sort_keys=True, default=str)
+            except Exception:
+                canon = repr(block.get("input"))
+            args_hash = hashlib.sha1(canon.encode("utf-8", "replace")).hexdigest()[:12]
+            sigs.append((name, args_hash))
+    return sigs
+
+
+def detect_trailing_loop(transcript_path, threshold=LOOP_THRESHOLD):
+    """If the transcript's most recent tool calls are a run of >= `threshold`
+    identical (same tool, same args) consecutive calls, return (tool_name,
+    run_len); else None. Consecutive-identical is the low-false-positive
+    signature -- a healthy agent hammering one tool still varies its args."""
+    sigs = _tool_signatures(transcript_path)
+    if len(sigs) < threshold:
+        return None
+    last = sigs[-1]
+    run = 0
+    for sig in reversed(sigs):
+        if sig == last:
+            run += 1
+        else:
+            break
+    if run >= threshold:
+        return last[0], run
+    return None
+
+
+def build_loop_alerts(latest_by_agent, entries_by_agent_id, project_dir, now):
+    """Mirror of build_stale_alerts for the noisy-but-spinning case. For each
+    active agent, read its own transcript tail and flag a trailing run of
+    identical tool calls. Deduped via a SEPARATE `last_loop_alert_at` field so a
+    loop alert and a stale alert never suppress each other (a pure MCP-tool loop
+    can look stale AND looping at once). Returns (alert_lines, agent_ids_to_stamp)."""
+    alerts, to_stamp = [], []
+    for aid, row in latest_by_agent.items():
+        entry = entries_by_agent_id.get(aid)
+        if not entry:
+            continue
+        if entry.get("status", "unknown") in EXCLUDED_STATUSES:
+            continue
+        last_loop = entry.get("last_loop_alert_at")
+        if last_loop:
+            try:
+                if (now - parse_ts(last_loop)).total_seconds() < DEDUPE_WINDOW_SEC:
+                    continue
+            except Exception:
+                pass  # malformed timestamp must never suppress a real alert
+        transcript = find_agent_transcript(project_dir, aid, entry.get("session_id"))
+        if not transcript:
+            continue
+        hit = detect_trailing_loop(transcript)
+        if not hit:
+            continue
+        tool_name, run = hit
+        name = entry.get("name") or aid
+        owes = entry.get("description") or entry.get("purpose")
+        line = "LOOP_AGENT %s repeated %s x%d (same args)" % (name, tool_name, run)
+        if owes:
+            line += " (owes: %s)" % owes
+        alerts.append(line)
+        to_stamp.append(aid)
+    return alerts, to_stamp
+
+
+def stamp_last_alert_at(campaign_dir, agent_ids, ts, field="last_alert_at"):
+    """Safely stamp <field>=ts onto each of the given agent_ids' existing
     registry entries. Reuses hooks/ledger.py's exact lock (the SAME
     .registry.lock file, so this and fold_registry() are mutually exclusive,
     never racing each other) and shape-tolerant read/normalize/write logic
@@ -278,7 +440,7 @@ def stamp_last_alert_at(campaign_dir, agent_ids, ts):
                 for aid in agent_ids:
                     if aid in entries:
                         entries[aid] = dict(entries[aid])
-                        entries[aid]["last_alert_at"] = ts
+                        entries[aid][field] = ts
                         changed = True
                 if changed:
                     ledger.write_registry_shape(registry_path, shape, entries, passthrough, extra_keys)
@@ -333,15 +495,21 @@ def hook_main(raw):
     now = datetime.datetime.now(datetime.timezone.utc)
     latest = compute_latest_by_agent(rows)
     alerts, to_stamp = build_stale_alerts(latest, entries_by_agent_id, now)
-    if not alerts:
+    loop_alerts, loop_stamp = build_loop_alerts(
+        latest, entries_by_agent_id, project_dir, now
+    )
+    if not alerts and not loop_alerts:
         return
 
     stamp_last_alert_at(campaign_dir, to_stamp, ledger.now_iso())
+    stamp_last_alert_at(
+        campaign_dir, loop_stamp, ledger.now_iso(), field="last_loop_alert_at"
+    )
 
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": event_name,
-            "additionalContext": "\n".join(alerts),
+            "additionalContext": "\n".join(alerts + loop_alerts),
         }
     }))
 
@@ -380,7 +548,11 @@ def main():
         rows = load_rows(os.path.join(cdir, "events.jsonl"))
         if not rows:
             continue
-        lines = check_stale_agents(rows, now, stale_min * 60) + check_unanswered_gates(rows)
+        lines = (
+            check_stale_agents(rows, now, stale_min * 60)
+            + check_looping_agents(rows, project_dir)
+            + check_unanswered_gates(rows)
+        )
         for line in lines:
             if multi:
                 # re-tag "WATCHDOG: X ..." as "WATCHDOG: [<cid>] X ..." so a
