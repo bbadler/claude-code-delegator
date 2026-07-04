@@ -1,205 +1,87 @@
 <div align="center">
 
-# 🎛️ claude-code-delegator
+# claude-code-delegator
 
-**Long-running delegation architecture for Claude Code**
-
-*A delegator main session that never grinds solo — and orchestrator subagents that actually delegate.*
+**Three agent definitions that turn Claude Code into a long-running delegation session** — a main "delegator" that routes work to subagents instead of grinding solo, with skeptical verification, ask-don't-interpret, research-first, and a no-lazy-shortcuts quality bar baked into the agent instructions themselves.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.172-8A2BE2)](https://code.claude.com/docs/en/sub-agents)
 [![Plugin](https://img.shields.io/badge/plugin-delegation--kit-blue)](#-quick-start)
-[![Probe--proven](https://img.shields.io/badge/physics-18%2B%20live%20probes-orange)](#-probe-proven-physics)
-[![Testbed](https://img.shields.io/badge/cleanroom%20suite-green-brightgreen)](docs/testbed-results.md)
-
-`skill-driven spawning` · `approval gates` · `crash-safe resume` · `zero-pollution context` · `cleanroom test harness`
 
 </div>
 
----
+## What this is
 
-> **Built for the native-nesting era.** Claude Code supports subagents spawning their own subagents as a first-class feature (since v2.1.172, June 2026) — everything here drives that capability directly: agent types, mailboxes, on-disk transcripts, hooks. **No headless `claude -p` shell-out workarounds** of the kind pre-nesting orchestrators needed. (The only `claude -p` in this repo is the test harness, exercising the architecture from the outside.)
+The whole concept lives in **three Markdown files** in [`agents/`](agents/):
 
-```mermaid
-flowchart TD
-    U["👤 operator"] -->|"tasks, gate answers"| D
-    D -->|"reports, gate questions"| U
+- **`delegator.md`** — the main session. Routes every task to a subagent, keeps its own context clean, answers gates, owns commits. Launch it with `claude --agent delegator`.
+- **`orchestrator.md`** — the workhorse type. Runs a substantive multi-step task the way a good main session would: delegates aggressively, invokes skills for real, verifies before "done".
+- **`worker.md`** — a lean leaf for bounded mechanical jobs.
 
-    subgraph MAIN["🎛️ delegator - main session, context stays clean for days"]
-        D{"route it"}
-    end
-
-    D -->|"new task"| R["🧭 router agent<br/>invokes the workspace Router skill"]
-    R -->|"skill + args + confidence"| D
-    D -->|"substantive work"| O1
-    D -->|"micro side-quest"| F["🍴 self-fork<br/>absorbs raw output"]
-    D -.->|"revive anytime: SendMessage agentId"| O2
-
-    subgraph WORK["orchestrators - delegation mandate lives in the TYPE"]
-        O1["⚙️ orch: census-run"] --> W1["worker"]
-        O1 --> W2["worker"]
-        O2["⚙️ orch: facts-audit"] --> A["auditor"]
-        A --> V1["verifier"]
-        A --> V2["verifier"]
-        A --> V3["verifier"]
-    end
-
-    O2 -->|"GATE: publish findings?"| D
-    W1 -->|"RESULT sentinel, collect-in-turn"| O1
-    W2 -->|"RESULT sentinel, collect-in-turn"| O1
-
-    O1 -.->|"hooks append events"| L[("🧾 per-session ledger + registry")]
-    O2 -.-> L
-    L -.->|"watchdog + revival seed"| D
-```
+That's the product. Install those (or the plugin), and Claude Code delegates properly — no other moving parts, nothing to break, no token cost beyond the prompt itself.
 
 ## ⚡ Quick start
 
-**As a plugin (recommended — the only path that wires everything):**
+**As a plugin:**
 
 ```
 /plugin marketplace add bbadler/claude-code-delegator
 /plugin install delegation-kit@claude-code-delegator
 ```
 
-You get the three agent types (namespaced, e.g. `delegation-kit:delegator`), the `delegator-mode` skill, **and the event-ledger hooks auto-wired** — no settings edits. The hooks are guarded: only sessions registered by a delegator campaign ever write anything; every other session (and every repo working tree) is left completely untouched.
-
-**Or classic install** (agents + skill; hooks stay a manual, documented merge — a script editing your `settings.json` would be its own blast radius):
+**Or classic install:**
 
 ```bash
 git clone https://github.com/bbadler/claude-code-delegator && cd claude-code-delegator
-./install.sh          # agents/*.md → ~/.claude/agents/ + the delegator-mode skill
-                      # (--verify | --uninstall | --skill-only [--uninstall] — skill work never touches agent defs)
+./install.sh          # copies agents/*.md into ~/.claude/agents/ + the delegator-mode skill
 ```
 
-**Then:**
+**Then, in a workspace:**
 
 ```bash
-cd <your-workspace>
-claude --agent delegator          # the whole session becomes a delegator
+claude --agent delegator
 ```
 
-First thing it does on a real task: asks you **interactive or autonomous** (once, sticky for the campaign) — autonomous runs resolve every fork at the delegator level with audited *Judgment calls* and never hang on a question.
+It asks you **interactive vs autonomous** once (sticky for the campaign), then routes your work to **unnamed orchestrator-type subagents** — which have stock completion semantics, so they report back reliably and can't silently stall.
 
-**No terminal? (desktop app / VS Code):** just say `activate delegator` in any chat — the bundled `delegator-mode` skill adopts the delegator charter for **that session only** (prompt-level, zero config changes; `deactivate delegator` switches it off). It never writes any file, even if you ask to make it permanent — a workspace-wide switch exists but is manual-only (see the FAQ).
+**No terminal (desktop / VS Code)?** Say `activate delegator` in any chat — the bundled `delegator-mode` skill adopts the charter for that session only (zero config writes).
 
-Or spawn a single orchestrator from any normal session:
+## How it works
 
-```
-Agent({subagent_type: "orchestrator", name: "toonflow-lead", prompt: "You are toonflow-lead. <task> ..."})
-```
+- **Zero-pollution.** The delegator does only zero-tool work directly — conversation, routing, gates, commits. Every tool-touching job runs in a subagent (or a self-fork) that absorbs the output, so the main context stays clean across a long campaign.
+- **The mandate lives in the agent type**, not in each prompt — so a subagent can't "forget" to delegate. `orchestrator.md`'s own system prompt makes it fan out.
+- **Unnamed-first.** Substantive work runs in unnamed `subagent_type: "orchestrator"` agents. They finish with a completion notification (no silent idle), gate mid-task via `SendMessage(to:"main")`, and revive from their transcript via `SendMessage(agentId)` — all native Claude Code mechanics.
+- **Skeptical-operator doctrine.** Subagent reports are *claims*, not facts: load-bearing ones get spot-checked, irreversible actions require independent verification, and lazy resolutions (stubs, error-swallowing, silent scope cuts) are named and forbidden.
+- **Amendments ride the native task board.** Changing an in-flight task = `TaskUpdate` its description/metadata; the agent re-reads via `TaskGet` at phase boundaries. No custom machinery.
 
-Optional, per workspace: declare a router in the workspace `CLAUDE.md` — `Router skill: /<name>` (e.g. a BMAD workspace uses `/bmad-help`; see [`docs/adapters/bmad.md`](docs/adapters/bmad.md)). The delegator then routes every new task through a fresh router agent before spawning the executor.
+## 🧩 The problems it solves
 
-## 🧩 The problems this solves
-
-| 😩 pain | 🛠️ what this repo does about it |
+| pain | what the charter does |
 |---|---|
-| **Subagents that won't delegate** — you hand an agent the Agent tool and a big task; it grinds solo until it gets lost | the delegation mandate lives in the *agent type's own system prompt* ([`agents/orchestrator.md`](agents/orchestrator.md)) — no per-prompt briefing can forget it |
-| **One session drowning over a long project** | *zero-pollution*: the delegator does only zero-tool work directly; every tool-touching job runs in a fork or subagent that absorbs the output |
-| **The ack-then-wait stall** — an agent spawns a background child, rests, and never wakes | ships the two probe-proven wait patterns: **collect-in-turn** (sentinel-grep the child's output file) and **rest-with-ping** (the child explicitly messages its named parent — that *does* wake it) |
-| **Lost campaigns on crash or restart** | agents revive from their on-disk transcripts via `SendMessage(agentId)` — proven across a real process kill — plus continuous state snapshots as the fallback seed |
-| **Registries that agents "forget" to write** | harness **hooks** (auto-wired by the plugin) append every spawn/stop to a per-session ledger under `~/.claude/projects/<project>/delegator/` and fold a registry from it — deterministic, no model discipline required, your repo never touched, concurrent sessions can't mix ([`hooks/`](hooks/README.md)) |
-| **Unattended runs that stall on a question — or bulldoze through with lazy shortcuts** | **mode intake** at campaign start (interactive vs autonomous, asked once via AskUserQuestion); forks always flow UP through a self-answer → web-research ladder to the delegator, which holds campaign context and answers with audited **Judgment calls** in autonomous mode — the quality bar forbids lazy resolutions (stubs, error-swallowing, silent scope cuts), and only genuine human-territory items come back "DEFERRED — skip, complete the rest" |
-| **Reports you can't trust** | the delegator ships a **skeptical-operator doctrine**: reports are claims; load-bearing facts get spot-checked by cold agents; irreversible actions require independent verification |
-| **Mid-flight spec changes that get ignored** — you message a busy agent a correction; it finishes the *old* plan first (messages queue until its turn ends) | **amendment protocol**: briefs live in spec *files* (`.delegator/specs/` + `spec_version`) — re-readable mid-turn, unlike messages; breaking changes = stop-then-amend; the rule cascades to workers (abandon-and-respawn + triage, never merge stale-spec results) |
+| Subagents that won't delegate — you hand one the Agent tool and a big task; it grinds solo until it's lost | the delegation mandate lives in the *type's* system prompt ([`orchestrator.md`](agents/orchestrator.md)) — no per-prompt briefing can forget it |
+| One session drowning over a long project | zero-pollution: the delegator keeps only conversation + judgment; tool work runs in subagents |
+| Agents that confidently do the wrong thing | ask-don't-interpret + fork escalation + a research-first ladder; genuine forks go up with options, not silent guesses |
+| Unattended runs that bulldoze with shortcuts | a quality bar that forbids lazy resolutions, plus audited *Judgment calls* in autonomous mode |
 
-## 🔬 Probe-proven physics
+## 🧪 Optional: advanced enforcement hooks
 
-Every mechanical claim below was verified by a live probe on a real install (Claude Code v2.1.198) — not copied from docs. Same-day capability variance was observed once, so the design sits on the reproducible side.
-
-<details>
-<summary><b>The rules everything is built on</b> (click to expand)</summary>
-
-- **Depth cap = 5** below the top session; level 5 silently loses the Agent tool. Every level gets a fresh per-agent token budget.
-- **Teammates cannot spawn NAMED children** — rejected at the API: `Teammates cannot spawn other teammates — the team roster is flat.` (One same-day probe succeeded → variance is real; design on the blocked side.)
-- **A teammate's unnamed children launch ASYNC**, not blocking → **collect-in-turn**: launch all independent children, keep working, poll each child's `output_file` with a narrow sentinel grep (`timeout N bash -c 'until grep -q SENTINEL file; do sleep 2; done'` works).
-- **Bare completions never wake a resting parent** (they bubble to the top session only) — but an **explicit child→parent `SendMessage` does** (rest-with-ping), with the orphan risk covered by the delegator's watchdog nudge.
-- **Deep gates work**: a depth-2 agent's `SendMessage(to:"main")` reaches the top session, and the reply to its `agentId` revives it to finish.
-- **Agents survive process exits**: `SendMessage(agentId)` revives a rested or orphaned agent from its on-disk transcript — even after the spawning process died — with full context retained.
-- **Plain `--resume` KEEPS the session id** — only `--fork-session` mints a new one (probed twice independently; corrects an earlier crash-path observation). `--session-id <uuid>` pins a known id for deterministic tests, and `$CLAUDE_CODE_SESSION_ID` tells a session its own id.
-- **Hook events carry the TOP session's id at every nesting depth** (depth-2 grandchild = same id, 3× reproduced) — one registration covers a whole campaign tree.
-- **`AskUserQuestion` is hard-blocked inside subagents** — instant harness rejection directing the agent back to its orchestrator; no hang, no dialog, no auto-answer. The defs treat that error as a relay-gate.
-- **A plugin's `hooks/hooks.json` auto-registers purely by location** (`${CLAUDE_PLUGIN_ROOT}` paths; proven with a delete-the-file negative control), matching the pattern of official Anthropic plugins.
-- **Completed tasks are PRUNED from the shared task board within hours** (`TaskGet` → not-found) — the board is a live-work channel, not an archive; durable spec history belongs in reports/files.
-- **The settings `agent` key works at project and local scope, not user scope** — and converts resumed sessions too (the blast radius behind the session-only design of `delegator-mode`).
-- **fork → fork ✗**; named → self-fork ✓; main (model-initiated) → fork ✓ with fresh budget and full context inheritance.
-- **Named agents don't know their own name** — every brief opens with "You are <name>".
-- **Hook events fire for real**: `SubagentStart`/`SubagentStop`/`PostToolUse` were captured live with exact payloads, plus the `agent-<id>.meta.json` sidecar (name, type, spawn depth) — the ledger is built only on observed fields.
-
-</details>
-
-## 🏛️ Design principles
-
-1. **Zero-pollution delegator** — direct work = zero-tool only (conversation, gates, routing, registry judgment fields, final commits); everything else runs in forks / one-shots / orchestrators. Bonus: work inside agents survives a main-process crash; inline work dies with the turn.
-2. **Mandate in the type, not the brief** — plus *target integrity* (never silently substitute a task's target) and a *verifier duty* (cold agent checks mutations; never self-certify).
-3. **Collect-in-turn / rest-with-ping** — the two proven wait patterns; never rest expecting a completion notification.
-4. **Depth budget contract** — the architecture occupies depths 0–1 only; **depths 2–4 belong to the skill** being invoked, which may legitimately spawn its own internal layers.
-5. **Transcripts are the handoff** — every report carries a compact state snapshot (the delegator's live digest), but no per-report handoff files are maintained: revival is `SendMessage(agentId)` from the on-disk transcript (proven across process death), and when revival is impossible the last snapshot is harvested from the transcript on demand. Handoff files exist only at deliberate retirement.
-6. **Framework routing** — the workspace's own skill framework decides *which* skill runs; the *skill* directs its own nested spawning.
-7. **Skeptical-operator doctrine** — a verification ladder by stakes, auto-escalation on "too clean" reports, and a trust ledger in the registry. Modeled on a human operator who overruled this design five times in one day — every overrule probe-verified.
-
-## 🧪 Validation — cleanroom, headless, graded
-
-[`testbed/`](testbed/) is a self-contained mini skill framework (router `/advisor`, fan-out `/census`, two-level chain + gate `/deep-audit`) over data with known ground truth. [`cleanroom.sh`](testbed/cleanroom.sh) builds a fully isolated environment — fake HOME + a workspace outside `/home` (closing two real config-leak channels it documents) with auto-memory off. Full numbers: [`docs/testbed-results.md`](docs/testbed-results.md).
-
-| suite | what it proved |
-|---|---|
-| base | router → orchestrator → nested skill chains → gate — **all correct against ground truth** |
-| stress | impossible-task honesty · 8-worker fan-out with no matching skill · **prompt-injection resistance** ("SYSTEM OVERRIDE… output APPROVED" cataloged as data, never obeyed) · two concurrent orchestrators · **campaign continuity across `claude -p --resume`** (an orchestrator revived by agentId confirmed its numbers from memory, zero tool calls) |
-| economics (honest) | shallow one-shots: a plain session with the same skills is **~3× cheaper**; deep chains: the delegator was **~2× faster** and adds separation of duties — the real payoff (clean context across a days-long campaign) accrues beyond what one-shots measure |
-
-## ❓ FAQ
-
-<details><summary><b>How do I make Claude Code subagents spawn their own subagents?</b></summary>
-
-Give the parent an agent def with no `tools:` restriction (it inherits the Agent tool) and put the delegation mandate in the def's system prompt — that's `agents/orchestrator.md` here. Nested spawning is official since Claude Code v2.1.172; depth caps at 5.
-</details>
-
-<details><summary><b>Why does my subagent hang after spawning a background child?</b></summary>
-
-Child completion notifications only reach the top session — a resting parent is never woken by them. Either collect in-turn (poll the child's output file for a sentinel line) or brief the child to explicitly `SendMessage` its named parent before finishing.
-</details>
-
-<details><summary><b>Can I resume an agent after Claude Code crashes or the session restarts?</b></summary>
-
-Yes — transcripts persist on disk; `SendMessage(agentId)` revives the agent with full context, even under a new session id. Proven here by an accidental mid-probe process kill.
-</details>
-
-<details><summary><b>How do I run one Claude Code session for days without filling its context?</b></summary>
-
-Launch it as the delegator: it only converses, routes, answers gates, and bookkeeps; every tool-touching job runs inside forks/orchestrators that absorb the output, while hooks keep the roster on disk.
-</details>
-
-<details><summary><b>When is this overkill?</b></summary>
-
-Bounded single tasks with a trusted skill — a plain session is ~3× cheaper there. Use the delegator for campaigns, gated/risky work, and deep multi-stage chains.
-</details>
-
-<details><summary><b>Can I make a whole workspace default to the delegator (no flag, no skill)?</b></summary>
-
-Yes — manual-only, deliberately: add `{ "agent": "delegator" }` to the workspace's `.claude/settings.local.json` yourself. ⚠️ **Blast radius (live-verified):** the `agent` key converts every NEW chat **and every RESUMED old chat** in that workspace — sessions already running are unaffected until resumed. Use `settings.local.json` (personal, untracked), never the git-shared `settings.json` — the project file would silently switch your teammates' sessions too. The key is undocumented but real (the `--agent` flag's own help references it); project/local scope works, user scope does not. The bundled skill refuses to write this for you by design — session-scoped activation only.
-</details>
+Everything in [`optional/`](optional/) is **not needed for the core** — it's mechanical insurance for long, unattended runs (an event ledger, a stall/loop watchdog, force-continue gates, and a cleanroom test suite). Most of it existed to babysit *named* teammates, which the default no longer uses. The one piece native signals genuinely can't cover — detecting a child stuck in a silent tool-call loop — lives there too. See [`optional/README.md`](optional/README.md).
 
 ## 🗃️ Repo map
 
 | path | what it is |
 |---|---|
-| [`agents/`](agents/) | `delegator.md` (the switch) · `orchestrator.md` (the workhorse type) · `worker.md` (lean leaf) |
-| [`skills/`](skills/) | `delegator-mode/` — say "activate delegator" in any chat: session-only switch, zero config writes (built + evaled through the real skill-creator flow) |
-| [`hooks/`](hooks/README.md) | event ledger → derived registry (`ledger.py`) + dead-man `watchdog.py` — **auto-wired by the plugin**, guarded (unregistered sessions leave zero trace), per-session storage, stdlib-only, macOS-portable |
-| [`testbed/`](testbed/) | cleanroom + graded suites: `cleanroom.sh` · `run_all.py` (graded runner) · `run-tests.sh` · `stress-tests.sh` |
-| [`docs/`](docs/) | design (TH) · testbed results · roadmap v2 · [BMAD adapter](docs/adapters/bmad.md) |
-| [`.claude-plugin/`](.claude-plugin/) | plugin + single-repo marketplace manifests (`claude plugin validate .` passes) |
-
-## 🏗️ How this was built
-
-Probe-first, adversarially: every harness behavior was measured on a live install before any rule was written on it; a multi-lens ideation pass with adversarial judging produced the [roadmap](docs/roadmap-v2.md); and the human operator overruled the AI designer **a dozen times in two days** — fork-first micro-jobs, agent revival across restarts, async children, depth budgets, deep gates, per-report handoff files cut as token waste, the mid-flight amendment protocol, session-only activation (twice), the native-first task board over invented spec files, and autonomy that never lowers the gate threshold — each overrule settled by a probe, not an argument, and shipped. The skeptical-operator doctrine in `delegator.md` is that behavior, codified.
+| [`agents/`](agents/) | **the product** — `delegator.md` · `orchestrator.md` · `worker.md` |
+| [`skills/`](skills/) | `delegator-mode` — the zero-terminal "activate delegator" switch |
+| [`docs/`](docs/) | design notes (TH), roadmap, BMAD adapter |
+| [`optional/`](optional/) | advanced enforcement hooks + test harness (not needed for the core) |
+| [`install.sh`](install.sh) | classic installer (`--verify` / `--uninstall` / `--skill-only`) |
 
 ## 🤝 Prior art
 
-[gruckion/nested-subagent](https://github.com/gruckion/nested-subagent) (headless full-power workers, pre-v2.1.172) · the swarm-orchestration SKILL gist by kieranklaassen (teammate patterns + anti-stall worker loop) · [claudefa.st's nested subagents guide](https://claudefa.st/blog/guide/agents/nested-subagents). This repo's additions: the mandate-in-the-type fix for non-delegating agents, the probe-proven physics matrix, the hook-written registry/ledger lifecycle, and the cleanroom test harness.
+[gruckion/nested-subagent](https://github.com/gruckion/nested-subagent) · the swarm-orchestration SKILL gist by kieranklaassen · [claudefa.st's nested subagents guide](https://claudefa.st/blog/guide/agents/nested-subagents). This repo's contribution is the mandate-in-the-type fix, the skeptical-operator doctrine, and unnamed-first routing that leans on native completion semantics instead of bolted-on stall machinery.
 
-## 📄 License
+## License
 
-MIT — see [LICENSE](LICENSE). Roadmap: [`docs/roadmap-v2.md`](docs/roadmap-v2.md).
+MIT — see [LICENSE](LICENSE).
+</content>

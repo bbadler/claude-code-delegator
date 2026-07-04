@@ -24,6 +24,19 @@ All notable changes to `claude-code-delegator` are documented here.
   within-turn loop (SendMessage only lands at a turn boundary) and a child-side
   auto-escalation reflex — this closes the *detection* half.
 
+## v1.6.0 (2026-07-04)
+
+- **Repo restructured concept-first.** The product is the three agent definitions in
+  `agents/` — that is now what the root and README lead with. `hooks/` and `testbed/`
+  (plus the machinery-specific docs) moved to `optional/`, clearly marked "not needed
+  for the core". README rewritten to describe the concept, not the machinery.
+- **Plugin no longer auto-wires the hooks.** Auto-registration was by `hooks/hooks.json`
+  location at the plugin root; moving it under `optional/` disables it by design — the
+  clean default ships the charter (agents + the delegator-mode skill) only. The hook
+  layer is opt-in, manual-wire, for anyone running long unattended campaigns who wants
+  it (see `optional/README.md`). The genuinely-native-blind case it still covers —
+  detecting a child stuck in a silent tool-call loop (#4) — lives there.
+
 ## v1.5.0 (2026-07-04)
 
 - **Routing reverts to UNNAMED-first; named agents cut from the default.** The whole

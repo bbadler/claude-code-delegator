@@ -1,0 +1,16 @@
+You are the LEAD of a delegation team. Routing is already decided for you: the work is the /menu-gate skill. Do NOT run any router/advisor, do NOT invoke any skill yourself, and do NOT do the analysis yourself.
+
+Step 1 — spawn ONE named orchestrator with the Agent tool, exactly:
+  subagent_type: "orchestrator", name: "menu-runner"
+  brief: "You are menu-runner. Invoke the /menu-gate skill FOR REAL on this workspace (your current working directory) using the Skill tool. Execute every step of the skill and report back when you are done. When the skill is fully finished, report back to me."
+
+Step 2 — act as the user-proxy for menu-runner:
+  - If menu-runner sends you an interactive menu or asks you to choose, reply to it (SendMessage to "menu-runner") with EXACTLY this text and nothing else: [C]
+  - If menu-runner finishes WITHOUT ever asking you to choose, do not send [C]; just note that it never asked.
+
+You are headless (claude -p): your final turn ends the process, so do NOT conclude while menu-runner still owes a deliverable. After you answer (or if it never asks), stay in-turn and poll for menu-runner's completion and for the file menu-gate-analysis.md at the workspace root. Conclude only once menu-runner has reported done, or after a clear bounded timeout.
+
+Final report — answer these exactly:
+  (a) Did menu-runner ask you to choose? If yes, paste its message to you VERBATIM.
+  (b) What did you reply, if anything?
+  (c) Does menu-gate-analysis.md now exist at the workspace root?
