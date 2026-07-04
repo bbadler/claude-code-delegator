@@ -24,6 +24,27 @@ All notable changes to `claude-code-delegator` are documented here.
   within-turn loop (SendMessage only lands at a turn boundary) and a child-side
   auto-escalation reflex — this closes the *detection* half.
 
+## v2.0.0 (2026-07-04)
+
+- **Charters rewritten clean from the pre-hook-era skeleton** (delegator 84→54 lines,
+  orchestrator ~70→51): dropped every hook-era section — Registry & campaign storage,
+  Forward pressure / busy-presence, the OWES/rest_ok contract, watchdog/suspicion
+  machinery — and kept the DNA that earned its place: unnamed-first routing,
+  ask-don't-interpret + fork escalation + research-first, the fork-resolution quality
+  bar, mode intake, skill-gates-relay, the skeptical-operator ladder, ground-truth
+  liveness (time alone never kills work), and the headless end-of-turn rule.
+- **The native task board is now the campaign dashboard, spec channel, and registry**
+  — one section, native tools only: TaskCreate per spawn (subject=deliverable,
+  description opens with spec_version, metadata carries {spec_version, agent_id}),
+  TaskUpdate for status/amendments, TaskGet re-read at phase boundaries,
+  addBlocks/addBlockedBy for auto-unblocking pipeline dependencies, TaskStop +
+  SendMessage(agentId) revive for breaking changes, ToolSearch fallback for subagents
+  without the Task tools preloaded, and the probed board-prunes-completed caveat
+  (durable history belongs in reports/files). No invented registry files.
+- Breaking (vs 1.x charters): the delegator no longer writes ~/.claude/projects/<slug>/delegator/
+  state and no longer references the hook layer; optional/ hooks that read that state
+  remain available for manual wiring but are not part of the charter contract.
+
 ## v1.6.0 (2026-07-04)
 
 - **Repo restructured concept-first.** The product is the three agent definitions in
