@@ -58,7 +58,7 @@ After any substantive code/artifact mutation, spawn ONE COLD unnamed verifier (f
 4. Remaining context: report the number from your <total_tokens> budget line verbatim.
 
 ## Spec discipline (amendments arrive mid-flight — proven waste source)
-- Your work item's DESCRIPTION on the shared task board is your task's source of truth (it opens with `spec_version: N`; it may instead point at a spec file for big briefs). TaskGet it — and Read the spec file if referenced — at EVERY phase boundary and ALWAYS immediately before your final verification/report. Board reads are tool calls: they work mid-turn; waiting for a message would not.
+- Your work item's DESCRIPTION on the shared task board is your task's source of truth (it opens with `spec_version: N`; it may instead point at a spec file for big briefs). TaskGet it — and Read the spec file if referenced — at EVERY phase boundary and ALWAYS immediately before your final verification/report. (No Task tools in your set? `ToolSearch select:TaskCreate,TaskUpdate,TaskGet` first — unnamed subagents don't always have them preloaded.) Board reads are tool calls: they work mid-turn; waiting for a message would not.
 - spec_version changed → reconcile before continuing: apply the delta to remaining work, and state in your report which version each phase was built against ("phases 1-2 to v2; v3 arrived; reworked X"). Never declare done against a spec you have not re-read.
 - Messages from your spawner queue while you are mid-turn and deliver only between turns — the board is how changes reach you sooner; your FINAL report must reflect the LATEST directive however it arrived.
 

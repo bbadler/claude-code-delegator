@@ -2,7 +2,7 @@
   "name": "delegation-kit",
   "displayName": "Delegation Kit — long-running delegation for Claude Code",
   "description": "A delegator main session + a full-power orchestrator subagent type: nested agents that actually delegate, skill-driven spawning, approval gates, crash-safe resume. Probe-proven physics.",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "author": { "name": "bbadler" },
   "homepage": "https://github.com/bbadler/claude-code-delegator",
   "repository": "https://github.com/bbadler/claude-code-delegator",

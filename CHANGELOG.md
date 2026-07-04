@@ -24,6 +24,26 @@ All notable changes to `claude-code-delegator` are documented here.
   within-turn loop (SendMessage only lands at a turn boundary) and a child-side
   auto-escalation reflex — this closes the *detection* half.
 
+## v1.5.0 (2026-07-04)
+
+- **Routing reverts to UNNAMED-first; named agents cut from the default.** The whole
+  busy-presence / stall-detection apparatus existed to babysit NAMED teammates, which
+  go idle mid-task with no completion semantics (turn-end = idle, not done). Unnamed
+  orchestrator-type agents have STOCK completion semantics — a turn-end is DONE, with a
+  guaranteed completion notification — so they cannot silently stall, and the stall
+  machinery is simply not needed for them. Delegator now spawns
+  `Agent({subagent_type: "orchestrator", prompt})` (no name); multi-turn/gating still
+  works unnamed (gate via SendMessage(to:"main"), revive via SendMessage(agentId) —
+  probe-proven). Named is no longer a routing option.
+- **Amendment protocol confirmed native-tool-based.** Changing an in-flight task uses the
+  native shared task board (TaskUpdate the task description/metadata; the agent re-reads
+  via TaskGet at phase boundaries) — no custom machinery. Added the robustness note that
+  unnamed subagents may need `ToolSearch select:TaskCreate,TaskUpdate,TaskGet` first; the
+  board is session-shared so their writes land where the lead reads.
+- Note: with unnamed-first, the hook layer (stop/idle gates, stall-watchdog, ledger) is
+  redundant for the default path — the charter says so. A follow-up will demote it to
+  clearly-optional and trim the now-moot busy-presence prose from the charter.
+
 ## v1.4.2 (2026-07-04)
 
 - **Consecutive-block valve — token-runaway backstop for the force-continue gates.**
