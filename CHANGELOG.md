@@ -24,6 +24,23 @@ All notable changes to `claude-code-delegator` are documented here.
   within-turn loop (SendMessage only lands at a turn boundary) and a child-side
   auto-escalation reflex — this closes the *detection* half.
 
+## v1.4.2 (2026-07-04)
+
+- **Consecutive-block valve — token-runaway backstop for the force-continue gates.**
+  `stop_gate.py`/`idle_gate.py` force the model to keep going while work is
+  outstanding, so a stuck `owes:true` (bad data, unresolvable state) could in
+  principle re-block every fresh stop/idle forever and burn tokens. New shared
+  `ledger.note_block_and_relent()`: counts blocks that land on the SAME frozen
+  outstanding-work signature and, after 3 in a row, RELENTS (allows the stop/idle
+  — the watchdog's STALE/LOOP alerts + the human take over). Crucially it counts
+  only UNCHANGED state: a progressing campaign changes its signature (different
+  active agents) each turn and never trips the valve — verified that a 5-turn
+  progressing run never relents while a truly frozen one relents on the 4th block.
+  Resets whenever outstanding work clears; fully fail-open (a valve that can't
+  count relents rather than block forever). Complements the existing loop-guard
+  (`stop_hook_active`, one continuation chain) and the delegator's explicit
+  `rest_ok` escape. Verified by 5 synthetic cases, zero live sessions.
+
 ## v1.4.1 (2026-07-03)
 
 Bug-fix follow-up to v1.4.0 — all found by investigating the first real full-suite

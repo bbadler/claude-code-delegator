@@ -80,6 +80,12 @@ def main():
     campaign_dir = os.path.join(project_dir, "delegator", home_session_id)
     outstanding, reason = ledger.campaign_has_outstanding_work(campaign_dir)
     if not outstanding:
+        ledger.reset_block_counter(campaign_dir)
+        return
+    # Consecutive-block valve: if we have blocked cap times in a row on the SAME
+    # frozen outstanding state, relent (allow the stop) so a stuck-owes bug can't
+    # force turns forever -- watchdog STALE/LOOP + the human take over.
+    if ledger.note_block_and_relent(campaign_dir, reason):
         return
 
     print(json.dumps({

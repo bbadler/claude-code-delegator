@@ -299,6 +299,83 @@ def write_registry_shape(registry_path, shape, entries, passthrough, extra_keys)
     os.replace(tmp_path, registry_path)
 
 
+def note_block_and_relent(campaign_dir, signature, cap=3):
+    """Consecutive-block valve for the force-continue gates (stop_gate.py /
+    idle_gate.py) -- the token-runaway backstop the loop-guard (one continuation
+    chain) and rest_ok (delegator's explicit escape) don't cover: repeated FRESH
+    blocks on FROZEN outstanding state. Increments a top-level "consec_blocks"
+    counter under the ledger's own .registry.lock ONLY while `signature`
+    (campaign_has_outstanding_work's reason string) is UNCHANGED from the last
+    block; a progressing campaign changes its signature (different active agents)
+    each turn and never accumulates, while a genuinely STUCK one climbs and, past
+    `cap`, returns True = RELENT (allow the stop/idle instead of forcing yet
+    another turn; the watchdog's STALE/LOOP alerts + the human take over).
+    Fail-open: any error returns True -- a valve that cannot count must never be
+    the thing that blocks forever."""
+    registry_path = os.path.join(campaign_dir, "registry.json")
+    lock_path = os.path.join(campaign_dir, ".registry.lock")
+    try:
+        with open(lock_path, "a") as lockf:
+            if not flock_ex(lockf):
+                return True
+            try:
+                if not os.path.isfile(registry_path):
+                    return True
+                with open(registry_path) as f:
+                    existing = json.load(f)
+                normalized = normalize_existing(existing)
+                if normalized is None:
+                    return True
+                shape, entries, passthrough, extra_keys = normalized
+                if shape == "bare_list":
+                    return False
+                prev_sig = extra_keys.get("block_sig")
+                n = extra_keys.get("consec_blocks", 0)
+                if not isinstance(n, int) or n < 0:
+                    n = 0
+                n = n + 1 if prev_sig == signature else 1
+                extra_keys["block_sig"] = signature
+                extra_keys["consec_blocks"] = n
+                write_registry_shape(registry_path, shape, entries, passthrough, extra_keys)
+                return n > cap
+            finally:
+                flock_un(lockf)
+    except Exception:
+        return True
+
+
+def reset_block_counter(campaign_dir):
+    """Clear note_block_and_relent()'s counter -- gates call this whenever
+    campaign_has_outstanding_work() reports nothing outstanding, so the valve
+    only trips on a stuck campaign, never on one that reached a clean lull.
+    Fail-open silent; no-op when there is nothing to clear."""
+    registry_path = os.path.join(campaign_dir, "registry.json")
+    lock_path = os.path.join(campaign_dir, ".registry.lock")
+    try:
+        with open(lock_path, "a") as lockf:
+            if not flock_ex(lockf):
+                return
+            try:
+                if not os.path.isfile(registry_path):
+                    return
+                with open(registry_path) as f:
+                    existing = json.load(f)
+                normalized = normalize_existing(existing)
+                if normalized is None:
+                    return
+                shape, entries, passthrough, extra_keys = normalized
+                if shape == "bare_list":
+                    return
+                if extra_keys.get("consec_blocks") or extra_keys.get("block_sig"):
+                    extra_keys.pop("consec_blocks", None)
+                    extra_keys.pop("block_sig", None)
+                    write_registry_shape(registry_path, shape, entries, passthrough, extra_keys)
+            finally:
+                flock_un(lockf)
+    except Exception:
+        pass
+
+
 def fold_registry(ledger_dir):
     """Merge-aware: only sets/refreshes the MECHANICAL fields derived from the
     ledger (status, agent_type, name, depth, description, last_event*, session_id)

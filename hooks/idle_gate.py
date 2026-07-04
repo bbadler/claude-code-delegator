@@ -68,6 +68,9 @@ def main():
     campaign_dir = os.path.join(project_dir, "delegator", home_session_id)
     outstanding, reason = ledger.campaign_has_outstanding_work(campaign_dir)
     if not outstanding:
+        ledger.reset_block_counter(campaign_dir)
+        return
+    if ledger.note_block_and_relent(campaign_dir, reason):
         return
 
     sys.stderr.write(
