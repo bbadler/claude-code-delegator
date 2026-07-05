@@ -24,6 +24,16 @@ All notable changes to `claude-code-delegator` are documented here.
   within-turn loop (SendMessage only lands at a turn boundary) and a child-side
   auto-escalation reflex — this closes the *detection* half.
 
+## v2.0.1 (2026-07-04)
+
+- **delegator-mode skill aligned with the v2 charter** (it soft-adopts the charter, so
+  its own summary must match): "registry bookkeeping" → task-board bookkeeping, "named
+  orchestrator" → unnamed orchestrator-type subagent, and the @-mention warning now
+  gives the v2 reason (a subagent loses the main-session seat: mode intake, the board
+  as dashboard, being "main" that children gate to) instead of the named-children one.
+- Removed `skills/activate-workspace/` — 264K of skill-creator eval artifacts
+  (iteration transcripts/benchmarks) that had no business shipping in the repo.
+
 ## v2.0.0 (2026-07-04)
 
 - **Charters rewritten clean from the pre-hook-era skeleton** (delegator 84→54 lines,
