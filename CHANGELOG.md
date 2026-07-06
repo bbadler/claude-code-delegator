@@ -24,6 +24,29 @@ All notable changes to `claude-code-delegator` are documented here.
   within-turn loop (SendMessage only lands at a turn boundary) and a child-side
   auto-escalation reflex — this closes the *detection* half.
 
+## v2.0.2 (2026-07-04)
+
+Two field reports from real campaigns, both fixed at the charter level:
+
+- **Autonomous spawns use mode: "bypassPermissions" (closes #6).** In autonomous mode,
+  permission prompts (edit-accept, bash) were surfacing to the absent human — defeating
+  the mode's whole contract. Field-proven: acceptEdits is insufficient (edits-only, and
+  it does NOT propagate to grandchildren spawned by an invoked skill), while
+  bypassPermissions propagates through the entire subagent subtree. Routing #5 now maps
+  permission mode to campaign mode (interactive → acceptEdits/default; autonomous →
+  bypassPermissions) with the guardrail note: bypass removes harness prompts, so the
+  delegator's judgment is the remaining gate — campaign-workspace-only, mode:"plan"
+  for risky work, DEFER for human territory. The autonomous gate-policy bullet states
+  it plainly: a permission prompt surfacing to an absent human IS a stall.
+- **Loop-aware liveness (closes #4).** The ground-truth rule ("growing transcript =
+  working") had #4's exact blind spot: a child in a tight tool-call loop GROWS its
+  transcript while doing nothing (149 identical calls in the motivating incident).
+  Lifecycle now carves the exception: growth with REPETITION (same tool + same args
+  over and over in the tail) = a loop, not progress — nudge citing the observation,
+  unresponsive → TaskStop + respawn from last good state. The optional watchdog's
+  LOOP_AGENT signal (PR #5) automates the detection for those who wire it; the charter
+  response works with or without it.
+
 ## v2.0.1 (2026-07-04)
 
 - **delegator-mode skill aligned with the v2 charter** (it soft-adopts the charter, so
