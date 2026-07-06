@@ -24,6 +24,22 @@ All notable changes to `claude-code-delegator` are documented here.
   within-turn loop (SendMessage only lands at a turn boundary) and a child-side
   auto-escalation reflex — this closes the *detection* half.
 
+## v2.0.3 (2026-07-04)
+
+- **REUSE BEFORE RESPAWN (field report).** The delegator was spawning a fresh agent for
+  every follow-up even when an existing agent already held the relevant context — the
+  verifier that just found the issues, the investigator that already mapped the area.
+  Routing gains step 2: revive the context-holder via SendMessage(agentId) whenever the
+  next task genuinely benefits from what it already knows (builder→follow-up build,
+  investigator→deeper dive, verifier→apply its own findings); keep a living roster
+  (agentId · what it knows · remaining tokens from its reports — the board prunes, so
+  the roster lives in the delegator's notes). Fresh spawns remain mandatory where
+  INDEPENDENCE matters — verification is always cold, a producer never certifies its
+  own work, and post-fix re-verification is cold again — or when the agent's remaining
+  budget is under ~2x the next task, or its assumptions went stale. (This restores a
+  v1.x routing rule that the v2 rewrite dropped, now sharpened with the cold-verify
+  exception and the budget threshold.)
+
 ## v2.0.2 (2026-07-04)
 
 Two field reports from real campaigns, both fixed at the charter level:
