@@ -59,7 +59,7 @@ It asks you **interactive vs autonomous** once (sticky for the campaign), then r
 | pain | what the charter does |
 |---|---|
 | Subagents that won't delegate — you hand one the Agent tool and a big task; it grinds solo until it's lost | the delegation mandate lives in the *type's* system prompt ([`orchestrator.md`](agents/orchestrator.md)) — no per-prompt briefing can forget it |
-| One session drowning over a long project | zero-pollution: the delegator keeps only conversation + judgment; tool work runs in subagents |
+| One session drowning over a long project | the hands rule: the delegator keeps conversation + judgment + small bounded probes; everything exploratory or bulky runs in subagents |
 | Agents that confidently do the wrong thing | ask-don't-interpret + fork escalation + a research-first ladder; genuine forks go up with options, not silent guesses |
 | Unattended runs that bulldoze with shortcuts | a quality bar that forbids lazy resolutions, plus audited *Judgment calls* in autonomous mode |
 

@@ -24,6 +24,22 @@ All notable changes to `claude-code-delegator` are documented here.
   within-turn loop (SendMessage only lands at a turn boundary) and a child-side
   auto-escalation reflex — this closes the *detection* half.
 
+## v2.0.4 (2026-07-11)
+
+- **Zero-pollution → the hands rule (field report).** v2.0.0's "ALL other tool work runs
+  outside your window — even 1-2 tool calls" left the delegator blind: it spawned a fork
+  for every 10-second look (a `git status`, one grep, one config line), paying spawn
+  overhead + a full context re-read for jobs cheaper than the spawn itself. The rule also
+  contradicted the charter's own orders in three places — the liveness check (`stat` the
+  child's output/transcript), the HEADLESS sentinel poll, and the verification ladder's
+  spot-checks all demand direct tool use. New rule: DIRECT includes small bounded probes —
+  any job you can name in advance, ≤~3 calls, each predictably returning lines not screens;
+  DELEGATE the moment a job is exploratory (step count unknown), bulky, or multi-step.
+  The original protection survives as a TRIPWIRE: a "quick look" reaching for a 4th call
+  or coming back a screenful has become a delegation — hand it off mid-stream.
+  Skeptical ladder (b) updated to match (spot-checks are direct now, not "fork or cold
+  worker"). `delegator-mode` skill + README problems-table row updated to the same rule.
+
 ## v2.0.3 (2026-07-04)
 
 - **REUSE BEFORE RESPAWN (field report).** The delegator was spawning a fresh agent for
